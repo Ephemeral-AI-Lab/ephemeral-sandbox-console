@@ -1,3 +1,11 @@
+.shell {
+  --app-shell-header-height: 44px !important;
+}
+
+.shell[data-dashboard-shell] {
+  --app-shell-header-height: 80px !important;
+}
+
 .header {
   border-bottom: 1px solid rgb(137 108 88 / 24%);
   box-shadow: 0 10px 30px rgb(39 31 28 / 7%);
@@ -75,37 +83,6 @@
   --connection-color: #ba1a1a;
 }
 
-.dashboardNav {
-  align-items: center;
-  align-self: stretch;
-  display: flex;
-  margin-inline: auto;
-}
-
-.dashboardNavLink {
-  align-items: center;
-  color: #3e6077;
-  display: inline-flex;
-  font-size: 0.93rem;
-  font-weight: 700;
-  height: 100%;
-  padding-inline: 16px;
-  position: relative;
-  text-decoration: none;
-}
-
-.dashboardNavLink::after {
-  background: #3e6077;
-  border-radius: 999px 999px 0 0;
-  bottom: 0;
-  content: "";
-  height: 3px;
-  left: 16px;
-  position: absolute;
-  right: 16px;
-}
-
-.dashboardNavLink:focus-visible,
 .brandLink:focus-visible {
   border-radius: 4px;
   outline: 2px solid #3e6077;
@@ -122,17 +99,14 @@
   display: none;
 }
 
-.dashboardMain {
-  height: calc(100dvh - 80px);
-}
-
+.dashboardMain,
 .detailMain {
-  height: calc(100dvh - 44px);
+  height: 100dvh;
 }
 
 @media (max-width: 47.99em) {
-  .dashboardMain {
-    height: calc(100dvh - 64px);
+  .shell[data-dashboard-shell] {
+    --app-shell-header-height: 64px !important;
   }
 
   .headerInner {

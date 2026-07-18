@@ -18,4 +18,11 @@ describe("Vite preview proxy", () => {
     );
     expect(source).not.toContain('new URL("./public"');
   });
+
+  it("emits authoritative Vite and shared-asset manifests for the BFF cache policy", async () => {
+    const source = await readFile(join(resolve(process.cwd()), "vite.config.ts"), "utf8");
+
+    expect(source).toContain("manifest: true");
+    expect(source).toContain('fileName: ".vite/shared-assets-manifest.json"');
+  });
 });

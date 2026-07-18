@@ -352,6 +352,48 @@ async function expectMetric(page: Page, label: string, value: string) {
   await expect(item).toContainText(value);
 }
 
+async function expectRouteOwnedScrollAndReachableFooter(page: Page) {
+  const board = page.locator("[data-fleet-board]");
+  const initial = await page.evaluate(() => {
+    const route = document.querySelector<HTMLElement>("[data-fleet-board]");
+    return {
+      documentClientHeight: document.documentElement.clientHeight,
+      documentScrollHeight: document.documentElement.scrollHeight,
+      routeBottom: route?.getBoundingClientRect().bottom ?? 0,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  expect(initial.documentScrollHeight).toBe(initial.documentClientHeight);
+  expect(Math.abs(initial.routeBottom - initial.viewportHeight)).toBeLessThanOrEqual(1);
+
+  const scrolled = await board.evaluate((route) => {
+    const maximumScrollTop = Math.max(0, route.scrollHeight - route.clientHeight);
+    route.scrollTo({ behavior: "instant", top: route.scrollHeight });
+    const footer = route.querySelector("footer");
+    const footerBox = footer?.getBoundingClientRect();
+    return {
+      footerBottom: footerBox?.bottom ?? Number.POSITIVE_INFINITY,
+      footerTop: footerBox?.top ?? Number.NEGATIVE_INFINITY,
+      maximumScrollTop,
+      routeClientHeight: route.clientHeight,
+      routeScrollHeight: route.scrollHeight,
+      scrollTop: route.scrollTop,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  expect(
+    Math.abs(scrolled.scrollTop - scrolled.maximumScrollTop),
+  ).toBeLessThanOrEqual(1);
+  expect(scrolled.routeScrollHeight).toBeGreaterThanOrEqual(
+    scrolled.routeClientHeight,
+  );
+  expect(scrolled.footerTop).toBeGreaterThanOrEqual(0);
+  expect(scrolled.footerBottom).toBeLessThanOrEqual(scrolled.viewportHeight + 1);
+  await board.evaluate((route) => {
+    route.scrollTo({ behavior: "instant", top: 0 });
+  });
+}
+
 function distinctPositions(values: number[], tolerance = 3): number[] {
   return values.reduce<number[]>((positions, value) => {
     if (!positions.some((position) => Math.abs(position - value) <= tolerance)) {
@@ -374,7 +416,7 @@ for (const { width, height } of requiredViewports) {
     await openFleet(page);
     await expect(page.locator("[data-fleet-card]")).toHaveCount(7);
     await expectMetric(page, "Active Commands", "1");
-    await expectMetric(page, "Avg Memory", "22.9 MiB");
+    await expectMetric(page, "Avg Memory", "23MiB");
     await expect(page).toHaveScreenshot(`p05-fleet-mixed-${width}x${height}.png`, {
       animations: "disabled",
     });
@@ -391,12 +433,7 @@ test("P05 header, connection, summary, and page landmarks use the Phase 1 surfac
     page.getByRole("link", { name: "Ephemeral Sandbox dashboard" }),
   ).toBeVisible();
   await expect(page.getByRole("status", { name: "Console Connected" })).toBeVisible();
-  await expect(
-    page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", {
-      name: "Dashboard",
-      exact: true,
-    }),
-  ).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New Sandbox" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Your sandboxes" })).toBeVisible();
   await expect(page.locator("main#main-content")).toBeVisible();
@@ -407,7 +444,7 @@ test("P05 header, connection, summary, and page landmarks use the Phase 1 surfac
   await expectMetric(page, "Total Sandboxes", "7");
   await expectMetric(page, "Ready", "4");
   await expectMetric(page, "Active Commands", "1");
-  await expectMetric(page, "Avg Memory", "22.9 MiB");
+  await expectMetric(page, "Avg Memory", "23MiB");
 });
 
 for (const {
@@ -447,11 +484,14 @@ for (const {
     const layout = await page.evaluate(() => {
       const board = document.querySelector<HTMLElement>("[data-fleet-board]");
       const header = document.querySelector<HTMLElement>("[data-console-shell] header");
+      const main = document.querySelector<HTMLElement>("[data-console-main]");
       return {
         bodyOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
         boardOverflowX: board ? getComputedStyle(board).overflowX : "",
+        boardBottom: board?.getBoundingClientRect().bottom ?? 0,
         headerHeight: header?.getBoundingClientRect().height ?? 0,
         headerPosition: header ? getComputedStyle(header).position : "",
+        mainBottom: main?.getBoundingClientRect().bottom ?? 0,
       };
     });
 
@@ -461,6 +501,8 @@ for (const {
     expect(layout.boardOverflowX).toBe("hidden");
     expect(layout.headerHeight).toBeCloseTo(headerHeight, 0);
     expect(layout.headerPosition).toBe("fixed");
+    expect(Math.abs(layout.mainBottom - height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.boardBottom - height)).toBeLessThanOrEqual(1);
     expect(cardBoxes.every((box) => box.width > 0 && box.height >= 300)).toBe(true);
     expect(
       [...cardBoxes, ...metricBoxes].every(
@@ -557,9 +599,13 @@ test("P05 empty and disconnected states remain explicit @visual", async ({ page 
   await expectMetric(page, "Ready", "0");
   await expectMetric(page, "Active Commands", "0");
   await expectMetric(page, "Avg Memory", "—");
+  await expect(
+    page.locator("[data-fleet-empty] [data-new-sandbox-trigger]"),
+  ).toHaveText("New Sandbox");
   await expect(page).toHaveScreenshot("p05-fleet-empty-375x812.png", {
     animations: "disabled",
   });
+  await expectRouteOwnedScrollAndReachableFooter(page);
 
   const disconnectedPage = await page.context().newPage();
   await disconnectedPage.setViewportSize({ width: 375, height: 812 });
@@ -579,6 +625,7 @@ test("P05 empty and disconnected states remain explicit @visual", async ({ page 
     "p05-fleet-disconnected-375x812.png",
     { animations: "disabled" },
   );
+  await expectRouteOwnedScrollAndReachableFooter(disconnectedPage);
   await disconnectedPage.close();
 });
 
@@ -918,6 +965,15 @@ test("P05 Fleet and creation surfaces have no Axe violations @a11y", async ({ pa
   await openFleet(page, { list: records(3, ["ready", "failed", "stopped"]) });
   await expect(page.locator("[data-fleet-card]")).toHaveCount(3);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await card(page, "sandbox-03")
+    .getByRole("button", { name: "Destroy sandbox-03" })
+    .click();
+  const destroyDialog = page.getByRole("dialog", { name: "Destroy sandbox" });
+  await expect(destroyDialog).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await destroyDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(destroyDialog).toBeHidden();
 
   await page.getByRole("button", { name: "New Sandbox" }).click();
   await expect(page.getByRole("dialog", { name: "Create sandbox" })).toBeVisible();

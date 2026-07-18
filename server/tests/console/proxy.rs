@@ -1,3 +1,4 @@
+use http::header::CONTENT_SECURITY_POLICY;
 use http::{Method, Request, StatusCode};
 use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -163,6 +164,10 @@ async fn websocket_upgrade_tunnels_bytes_both_ways() {
     let (mut response, _sender) = support::send_request(console, request).await;
 
     assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    assert_eq!(
+        response.headers()[CONTENT_SECURITY_POLICY],
+        "sandbox allow-scripts; default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' data: blob:; frame-src 'self'; worker-src 'self' blob:; frame-ancestors 'self'; form-action 'self'"
+    );
     let upgraded = hyper::upgrade::on(&mut response)
         .await
         .expect("client upgrade");

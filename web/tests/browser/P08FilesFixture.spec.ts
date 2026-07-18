@@ -95,6 +95,7 @@ async function openFiles(page: Page, path = "operator.txt", options: { rootEntry
   await page.goto(`/p08-files.html?path=${encodeURIComponent(path)}`);
   await expect(page.locator("[data-files-workspace]")).toBeVisible();
   await expect(page.locator(".cm-content")).toBeVisible();
+  await expect.poll(() => page.locator(".cm-blame-chip").count()).toBeGreaterThan(0);
 }
 
 for (const [width, height] of [
@@ -110,6 +111,12 @@ for (const [width, height] of [
   });
 }
 
+test("P08 shows published blame by default without a toolbar toggle", async ({ page }) => {
+  await openFiles(page);
+  await expect(page.getByRole("button", { name: "Blame", exact: true })).toHaveCount(0);
+  await expect(page.getByText("workspace_session:workspace-fixture")).toBeVisible();
+});
+
 test("P08 Files captures expanded tree and blame at desktop @visual", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openFiles(page);
@@ -118,7 +125,7 @@ test("P08 Files captures expanded tree and blame at desktop @visual", async ({ p
   await docs.focus();
   await page.keyboard.press("ArrowRight");
   await expect(tree.locator('[role="treeitem"][title="docs/operator.txt"]')).toBeVisible();
-  await page.getByRole("button", { name: "Blame" }).click();
+  await expect(page.getByRole("button", { name: "Blame", exact: true })).toHaveCount(0);
   await expect(page.getByText("workspace_session:workspace-fixture")).toBeVisible();
   await expect(page).toHaveScreenshot("p08-files-tree-blame-1440x900.png", { animations: "disabled" });
 });
@@ -131,7 +138,6 @@ test("P08 Files captures narrow Drawers @visual", async ({ page }) => {
   await expect(page).toHaveScreenshot("p08-files-navigator-drawer-375x812.png", { animations: "disabled" });
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Blame" }).click();
   await page.getByRole("button", { name: "Blame legend" }).click();
   await expect(page.getByRole("dialog", { name: "Blame legend" })).toBeVisible();
   await expect(page).toHaveScreenshot("p08-files-blame-drawer-375x812.png", { animations: "disabled" });
@@ -229,7 +235,6 @@ test("P08 keeps the CodeMirror instance through paging, blame, and a preserved c
   await openFiles(page);
   const editor = page.locator(".cm-editor");
   await editor.evaluate((element) => element.setAttribute("data-p08-editor", "operator"));
-  await page.getByRole("button", { name: "Blame" }).click();
   await expect(page.getByText("workspace_session:workspace-fixture")).toBeVisible();
   await expect(page.locator('[data-p08-editor="operator"]')).toHaveCount(1);
 
@@ -253,7 +258,6 @@ test("P08 uses narrow navigator and blame Drawers with focus restoration", async
   await page.keyboard.press("Escape");
   await expect(navigatorTrigger).toBeFocused();
 
-  await page.getByRole("button", { name: "Blame" }).click();
   const blameTrigger = page.getByRole("button", { name: "Blame legend" });
   await expect(blameTrigger).toBeVisible();
   await blameTrigger.click();

@@ -27,6 +27,12 @@ const brandDirectory = join(sharedRoot, "public/brand");
 const fontDirectory = join(sharedRoot, "public/fonts");
 const licenseDirectory = join(sharedRoot, "assets/licenses");
 const iconDirectory = join(repositoryRoot, "desktop/src-tauri/icons");
+const distDirectory = join(webRoot, "dist");
+const viteManifestPath = join(distDirectory, ".vite/manifest.json");
+const packagedSharedManifestPath = join(
+  distDirectory,
+  ".vite/shared-assets-manifest.json",
+);
 
 const expectedSource = Object.freeze({
   sha256: "b940877050866fb52b9e9e1142e7cffebfc5d5c77dfca26f0da5a82e00612bd3",
@@ -392,7 +398,15 @@ async function verify() {
 
 async function verifyDist() {
   await verify();
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const canonicalManifestBytes = await readFile(manifestPath);
+  const packagedManifestBytes = await readFile(packagedSharedManifestPath);
+  if (!canonicalManifestBytes.equals(packagedManifestBytes)) {
+    throw new Error(
+      "web/dist/.vite/shared-assets-manifest.json must exactly match shared/assets/manifest.json",
+    );
+  }
+
+  const manifest = JSON.parse(canonicalManifestBytes.toString("utf8"));
   const publicRecords = [
     ...Object.values(manifest.derivatives.web),
     ...manifest.derivatives.fonts,
@@ -406,7 +420,42 @@ async function verifyDist() {
     }
   }
 
-  for (const path of await walkFiles(join(webRoot, "dist"))) {
+  const viteManifest = JSON.parse(await readFile(viteManifestPath, "utf8"));
+  const viteOutputs = new Set();
+  for (const [key, chunk] of Object.entries(viteManifest)) {
+    if (!chunk || typeof chunk !== "object" || typeof chunk.file !== "string") {
+      throw new Error(`web/dist/.vite/manifest.json has an invalid ${key} entry`);
+    }
+    viteOutputs.add(chunk.file);
+    for (const field of ["css", "assets"]) {
+      if (chunk[field] === undefined) {
+        continue;
+      }
+      if (!Array.isArray(chunk[field]) || chunk[field].some((path) => typeof path !== "string")) {
+        throw new Error(`web/dist/.vite/manifest.json has an invalid ${key}.${field}`);
+      }
+      for (const path of chunk[field]) {
+        viteOutputs.add(path);
+      }
+    }
+  }
+  if (![...viteOutputs].some((path) => path.startsWith("assets/") && extname(path) === ".js")) {
+    throw new Error("Vite manifest does not identify the built JavaScript output");
+  }
+  for (const output of viteOutputs) {
+    const builtPath = resolve(distDirectory, output);
+    const relativePath = relative(distDirectory, builtPath);
+    if (
+      isAbsolute(output) ||
+      relativePath === ".." ||
+      relativePath.startsWith(`..${sep}`)
+    ) {
+      throw new Error(`Vite manifest output escapes web/dist: ${output}`);
+    }
+    await stat(builtPath);
+  }
+
+  for (const path of await walkFiles(distDirectory)) {
     if (![".html", ".css", ".js", ".mjs", ".json", ".map"].includes(extname(path))) {
       continue;
     }
@@ -419,7 +468,9 @@ async function verifyDist() {
       throw new Error(`${toRootPath(path)} contains a forbidden runtime asset dependency`);
     }
   }
-  process.stdout.write(`verified ${publicRecords.length} packaged public assets\n`);
+  process.stdout.write(
+    `verified ${publicRecords.length} packaged public assets and ${viteOutputs.size} Vite outputs\n`,
+  );
 }
 
 async function generate() {

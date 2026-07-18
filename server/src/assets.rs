@@ -2,11 +2,13 @@
 //! and missing files fall back to `index.html` so deep links resolve from a
 //! cold load; a built-in placeholder page covers the unbuilt-SPA case.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use http::header::{HeaderValue, CONTENT_SECURITY_POLICY};
 use http::StatusCode;
 use hyper::Response;
+use serde::Deserialize;
 
 use crate::response::{self, BoxBody};
 
@@ -20,8 +22,103 @@ const PLACEHOLDER_PAGE: &str = "<!doctype html>\
 
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL: &str = "public, max-age=0, must-revalidate";
+const CONSOLE_CSP: &str = "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; form-action 'self'";
+const VITE_MANIFEST_PATH: &str = ".vite/manifest.json";
+const SHARED_ASSET_MANIFEST_PATH: &str = ".vite/shared-assets-manifest.json";
+const SHARED_PUBLIC_PREFIX: &str = "shared/public/";
+
+#[derive(Debug, Default)]
+pub(crate) struct AssetCachePolicy {
+    immutable_paths: HashSet<PathBuf>,
+}
+
+#[derive(Deserialize)]
+struct ViteManifestChunk {
+    file: String,
+    #[serde(default)]
+    css: Vec<String>,
+    #[serde(default)]
+    assets: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct SharedAssetManifest {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u8,
+    product: String,
+    derivatives: SharedDerivatives,
+}
+
+#[derive(Deserialize)]
+struct SharedDerivatives {
+    web: HashMap<String, SharedAssetRecord>,
+}
+
+#[derive(Deserialize)]
+struct SharedAssetRecord {
+    path: String,
+}
+
+impl AssetCachePolicy {
+    pub(crate) fn load(assets_dir: Option<&Path>) -> Self {
+        let Some(assets_dir) = assets_dir else {
+            return Self::default();
+        };
+        let mut immutable_paths = HashSet::new();
+
+        if let Some(manifest) =
+            read_json::<HashMap<String, ViteManifestChunk>>(&assets_dir.join(VITE_MANIFEST_PATH))
+        {
+            for chunk in manifest.into_values() {
+                for path in std::iter::once(chunk.file)
+                    .chain(chunk.css)
+                    .chain(chunk.assets)
+                {
+                    if let Some(path) = manifest_path(&path) {
+                        if path.starts_with("assets") {
+                            immutable_paths.insert(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(manifest) =
+            read_json::<SharedAssetManifest>(&assets_dir.join(SHARED_ASSET_MANIFEST_PATH))
+        {
+            if manifest.schema_version == 1 && manifest.product == "Ephemeral Sandbox" {
+                for record in manifest.derivatives.web.into_values() {
+                    if let Some(path) = record
+                        .path
+                        .strip_prefix(SHARED_PUBLIC_PREFIX)
+                        .and_then(manifest_path)
+                    {
+                        if path.starts_with("brand") {
+                            immutable_paths.insert(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        Self { immutable_paths }
+    }
+
+    fn is_immutable(&self, relative: &Path) -> bool {
+        self.immutable_paths.contains(relative)
+    }
+}
 
 pub async fn serve(assets_dir: Option<&Path>, uri_path: &str) -> Response<BoxBody> {
+    let cache_policy = AssetCachePolicy::load(assets_dir);
+    serve_with_cache_policy(assets_dir, &cache_policy, uri_path).await
+}
+
+pub(crate) async fn serve_with_cache_policy(
+    assets_dir: Option<&Path>,
+    cache_policy: &AssetCachePolicy,
+    uri_path: &str,
+) -> Response<BoxBody> {
     let Some(assets_dir) = assets_dir else {
         return html_document(response::html(StatusCode::OK, PLACEHOLDER_PAGE));
     };
@@ -34,7 +131,7 @@ pub async fn serve(assets_dir: Option<&Path>, uri_path: &str) -> Response<BoxBod
         assets_dir.join(&relative)
     };
     match read_file(&candidate).await {
-        Some(body) => file_response(&candidate, body),
+        Some(body) => file_response(&candidate, &relative, cache_policy, body),
         None => match read_file(&assets_dir.join("index.html")).await {
             Some(body) => html_document(response::html(StatusCode::OK, body)),
             None => html_document(response::html(StatusCode::OK, PLACEHOLDER_PAGE)),
@@ -55,6 +152,18 @@ fn sanitize(uri_path: &str) -> Option<PathBuf> {
     Some(relative)
 }
 
+fn manifest_path(path: &str) -> Option<PathBuf> {
+    if path.is_empty() || path.starts_with('/') || path.contains('\\') {
+        return None;
+    }
+    sanitize(path)
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
 async fn read_file(path: &Path) -> Option<Vec<u8>> {
     if !path.is_file() {
         return None;
@@ -62,7 +171,12 @@ async fn read_file(path: &Path) -> Option<Vec<u8>> {
     tokio::fs::read(path).await.ok()
 }
 
-fn file_response(path: &Path, body: Vec<u8>) -> Response<BoxBody> {
+fn file_response(
+    path: &Path,
+    relative: &Path,
+    cache_policy: &AssetCachePolicy,
+    body: Vec<u8>,
+) -> Response<BoxBody> {
     let content_type = content_type_for(path);
     let mut response = Response::new(response::full(body));
     response.headers_mut().insert(
@@ -72,7 +186,7 @@ fn file_response(path: &Path, body: Vec<u8>) -> Response<BoxBody> {
     if content_type.starts_with("text/html") {
         html_document(response)
     } else {
-        let cache_control = if has_content_hash(path) {
+        let cache_control = if cache_policy.is_immutable(relative) {
             IMMUTABLE_CACHE_CONTROL
         } else {
             REVALIDATE_CACHE_CONTROL
@@ -89,33 +203,9 @@ fn html_document(response: Response<BoxBody>) -> Response<BoxBody> {
     let mut response = response::no_store(response);
     response.headers_mut().append(
         CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("frame-src 'self'"),
+        HeaderValue::from_static(CONSOLE_CSP),
     );
     response
-}
-
-fn has_content_hash(path: &Path) -> bool {
-    let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    stem.char_indices()
-        .filter(|(_, character)| matches!(character, '-' | '.'))
-        .map(|(index, _)| &stem[index + 1..])
-        .any(is_hash_suffix)
-}
-
-fn is_hash_suffix(suffix: &str) -> bool {
-    if !suffix
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
-        return false;
-    }
-    // Vite emits eight-character base64url hashes. Asset-pipeline derivatives
-    // use a hexadecimal source-hash prefix (currently eight characters, but
-    // accepting a longer digest keeps the cache rule format-independent).
-    suffix.len() == 8
-        || ((8..=64).contains(&suffix.len()) && suffix.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 fn content_type_for(path: &Path) -> &'static str {
@@ -131,32 +221,5 @@ fn content_type_for(path: &Path) -> &'static str {
         Some("woff2") => "font/woff2",
         Some("txt") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::has_content_hash;
-    use std::path::Path;
-
-    #[test]
-    fn content_hash_detection_uses_the_filename_not_its_directory() {
-        for path in [
-            "assets/index-BDcRxxNq.js",
-            "assets/index-CkijG-Lv.js",
-            "assets/index-vlm8_aqG.css",
-            "brand/ephemeral-sandbox-mascot-b9408770.webp",
-            "styles/app.0123456789abcdef.css",
-        ] {
-            assert!(has_content_hash(Path::new(path)), "{path}");
-        }
-        for path in [
-            "assets/app.js",
-            "assets/dashboard.css",
-            "brand/ephemeral-sandbox-mascot.webp",
-            "fonts/inter-latin-400-v18.woff2",
-        ] {
-            assert!(!has_content_hash(Path::new(path)), "{path}");
-        }
     }
 }

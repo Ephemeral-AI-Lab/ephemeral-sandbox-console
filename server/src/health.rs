@@ -19,6 +19,6 @@ pub async fn handle(state: &AppState, sandbox_id: &str) -> Response<BoxBody> {
                 "detail": "manager record is ready and has a daemon_http endpoint"
             }),
         ),
-        Err(error) => return error.into_response(),
+        Err(error) => error.into_response(),
     }
 }

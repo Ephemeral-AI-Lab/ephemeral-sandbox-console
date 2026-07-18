@@ -5,6 +5,8 @@ mod support;
 use http::header::{AUTHORIZATION, CONTENT_SECURITY_POLICY, COOKIE, ORIGIN, REFERER, SET_COOKIE};
 use http::{Method, Request, StatusCode};
 
+const PREVIEW_CSP: &str = "sandbox allow-scripts; default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' data: blob:; frame-src 'self'; worker-src 'self' blob:; frame-ancestors 'self'; form-action 'self'";
+
 #[tokio::test]
 async fn preview_proxy_strips_console_authority_and_enforces_the_opaque_response_policy() {
     let daemon = support::FakeDaemonHttp::spawn().await;
@@ -28,10 +30,7 @@ async fn preview_proxy_strips_console_authority_and_enforces_the_opaque_response
     let (response, _sender) = support::send_request(console, request).await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response.headers()[CONTENT_SECURITY_POLICY],
-        "sandbox allow-scripts; frame-ancestors 'self'"
-    );
+    assert_eq!(response.headers()[CONTENT_SECURITY_POLICY], PREVIEW_CSP);
     assert_eq!(response.headers()["referrer-policy"], "no-referrer");
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
     assert!(response.headers().get(SET_COOKIE).is_none());

@@ -93,7 +93,12 @@ pub async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Box
     if req.method() != Method::GET && req.method() != Method::HEAD {
         return response::text(StatusCode::METHOD_NOT_ALLOWED, "use GET");
     }
-    assets::serve(state.config.assets_dir.as_deref(), &path).await
+    assets::serve_with_cache_policy(
+        state.config.assets_dir.as_deref(),
+        &state.asset_cache,
+        &path,
+    )
+    .await
 }
 
 fn has_opaque_origin(headers: &http::HeaderMap) -> bool {

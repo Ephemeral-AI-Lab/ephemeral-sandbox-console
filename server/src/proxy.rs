@@ -37,7 +37,7 @@ const CLEAR_SITE_DATA: HeaderName = HeaderName::from_static("clear-site-data");
 const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-policy");
 const SERVICE_WORKER_ALLOWED: HeaderName = HeaderName::from_static("service-worker-allowed");
 
-const PREVIEW_CSP: &str = "sandbox allow-scripts; frame-ancestors 'self'";
+const PREVIEW_CSP: &str = "sandbox allow-scripts; default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' data: blob:; frame-src 'self'; worker-src 'self' blob:; frame-ancestors 'self'; form-action 'self'";
 const PREVIEW_PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), clipboard-read=(), clipboard-write=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), picture-in-picture=(), usb=(), web-share=()";
 
 pub async fn handle(state: &Arc<AppState>, req: Request<Incoming>) -> Response<BoxBody> {
@@ -466,9 +466,16 @@ mod tests {
         assert!(headers.get(SET_COOKIE).is_none());
         assert!(headers.get(CLEAR_SITE_DATA).is_none());
         assert!(headers.get(SERVICE_WORKER_ALLOWED).is_none());
-        assert_eq!(headers.get(CONTENT_SECURITY_POLICY).unwrap(), PREVIEW_CSP);
         assert_eq!(
-            headers.get(PERMISSIONS_POLICY).unwrap(),
+            headers
+                .get(CONTENT_SECURITY_POLICY)
+                .expect("preview CSP must be present"),
+            PREVIEW_CSP
+        );
+        assert_eq!(
+            headers
+                .get(PERMISSIONS_POLICY)
+                .expect("preview permissions policy must be present"),
             PREVIEW_PERMISSIONS_POLICY
         );
         assert_eq!(headers["referrer-policy"], "no-referrer");
@@ -487,9 +494,9 @@ mod tests {
         ] {
             assert_eq!(
                 preview_redirect_location(location, &policy)
-                    .unwrap()
+                    .expect("safe preview redirect must be accepted")
                     .to_str()
-                    .unwrap(),
+                    .expect("preview redirect must be valid ASCII"),
                 expected,
             );
         }

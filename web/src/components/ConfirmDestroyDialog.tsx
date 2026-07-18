@@ -36,52 +36,71 @@ export function ConfirmDestroyDialog({
   return (
     <>
       {trigger(() => onOpenChange(true))}
-      <Modal
+      <Modal.Root
         opened={open}
         onClose={close}
-        title="Destroy sandbox"
         centered
         closeOnClickOutside={!busy}
         closeOnEscape={!busy}
+        transitionProps={{ duration: 0 }}
       >
-        <Text size="sm" c="dimmed">
-          This stops the daemon, destroys the runtime sandbox, and removes the
-          record. It cannot be undone. Type <Text span ff="monospace" style={{ color: "var(--mantine-color-text)" }}>{sandboxId}</Text>{" "}
-          to confirm.
-        </Text>
-        <Input
-          mt="md"
-          value={typed}
-          onChange={(event) => setTyped(event.target.value)}
-          placeholder={sandboxId}
-          disabled={busy}
-          w="100%"
-          styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
-          autoFocus
-        />
-        {busy || logLines.length > 0 ? (
-          <Box mt="md">
-            <StreamLogPane lines={logLines} />
-          </Box>
-        ) : null}
-        <Group justify="flex-end" gap="sm" mt="lg">
-          <Button
-            variant="subtle"
-            onClick={close}
-            disabled={busy}
-          >
-            Cancel
-          </Button>
-          <Button
-            color="danger"
-            variant="filled"
-            disabled={!armed || busy}
-            onClick={onConfirm}
-          >
-            {busy ? "Destroying…" : "Destroy sandbox"}
-          </Button>
-        </Group>
-      </Modal>
+        <Modal.Overlay />
+        <Modal.Content>
+          <Modal.Body>
+            <Group justify="space-between" mb="md" wrap="nowrap">
+              <Modal.Title>Destroy sandbox</Modal.Title>
+              <Modal.CloseButton
+                aria-label="Close destroy dialog"
+                disabled={busy}
+              />
+            </Group>
+            <Text size="sm" c="dimmed">
+              This stops the daemon, destroys the runtime sandbox, and removes
+              the record. It cannot be undone. Type{" "}
+              <Text
+                span
+                ff="monospace"
+                style={{ color: "var(--mantine-color-text)" }}
+              >
+                {sandboxId}
+              </Text>{" "}
+              to confirm.
+            </Text>
+            <Input
+              mt="md"
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
+              placeholder={sandboxId}
+              disabled={busy}
+              w="100%"
+              styles={{
+                input: {
+                  fontFamily: "var(--mantine-font-family-monospace)",
+                },
+              }}
+              autoFocus
+            />
+            {busy || logLines.length > 0 ? (
+              <Box mt="md">
+                <StreamLogPane lines={logLines} />
+              </Box>
+            ) : null}
+            <Group justify="flex-end" gap="sm" mt="lg">
+              <Button variant="subtle" onClick={close} disabled={busy}>
+                Cancel
+              </Button>
+              <Button
+                color="danger"
+                variant="filled"
+                disabled={!armed || busy}
+                onClick={onConfirm}
+              >
+                {busy ? "Destroying…" : "Destroy sandbox"}
+              </Button>
+            </Group>
+          </Modal.Body>
+        </Modal.Content>
+      </Modal.Root>
     </>
   );
 }

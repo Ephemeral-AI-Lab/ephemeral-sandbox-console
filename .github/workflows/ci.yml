@@ -21,9 +21,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf
+      - name: Build the shared packaged web resource
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
       - name: Check repository boundaries
         run: bin/check-boundaries
       - name: Check formatting
@@ -64,6 +83,16 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf
       - name: Build the BFF and matching web bundle
         run: bin/package-console
       - name: Validate the installed layout
@@ -71,10 +100,24 @@ jobs:
           test -x dist/ephemeral-sandbox-console/bin/sandbox-console
           test -x dist/ephemeral-sandbox-console/bin/start-sandbox-console
           test -f dist/ephemeral-sandbox-console/share/ephemeral-sandbox-console/index.html
+      - name: Build the Tauri desktop package
+        run: npm --prefix web run tauri -- build --bundles deb --ci -- --locked
+      - name: Validate the packaged desktop web resource
+        run: |
+          desktop_deb=$(find target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$desktop_deb"
+          extract_root=$(mktemp -d)
+          trap 'rm -rf "$extract_root"' EXIT
+          dpkg-deb --extract "$desktop_deb" "$extract_root"
+          packaged_index=$(find "$extract_root" -type f -path '*/web-dist/index.html' -print -quit)
+          test -n "$packaged_index"
+          diff -qr web/dist "$(dirname "$packaged_index")"
       - uses: actions/upload-artifact@v4
         with:
           name: ephemeral-sandbox-console-linux
-          path: dist/ephemeral-sandbox-console-*.tar.gz
+          path: |
+            dist/ephemeral-sandbox-console-*.tar.gz
+            target/release/bundle/deb/*.deb
           if-no-files-found: error
 
   browser:

@@ -4,7 +4,9 @@
 //! the existing Rust BFF. Tauri owns only resource resolution, window
 //! lifecycle, and graceful server cancellation.
 
-use std::io;
+use std::ffi::OsString;
+use std::fs::File;
+use std::io::{self, Read};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -24,6 +26,9 @@ use uuid::Uuid;
 const MAIN_WINDOW_LABEL: &str = "main";
 const WEB_RESOURCE_DIR: &str = "web-dist";
 const LOOPBACK_BIND: &str = "127.0.0.1:0";
+const GATEWAY_AUTH_TOKEN_ENV: &str = "SANDBOX_GATEWAY_AUTH_TOKEN";
+const GATEWAY_TOKEN_FILE_ENV: &str = "SANDBOX_GATEWAY_TOKEN_FILE";
+const DEFAULT_GATEWAY_TOKEN_FILE: &str = ".ephemeral-sandbox/gateway.token";
 const SERVER_EXIT_GRACE: Duration = Duration::from_secs(3);
 
 type SetupResult<T> = Result<T, Box<dyn std::error::Error>>;
@@ -154,11 +159,24 @@ fn setup_desktop<R: tauri::Runtime>(
 }
 
 fn start_bff(web_dist: PathBuf) -> SetupResult<StartedBff> {
-    let overrides = ConsoleConfigOverrides {
+    let gateway_auth_token = discover_desktop_gateway_auth_token(
+        std::env::var_os(GATEWAY_AUTH_TOKEN_ENV),
+        std::env::var_os(GATEWAY_TOKEN_FILE_ENV),
+        std::env::var_os("HOME"),
+    )?;
+    start_bff_with_gateway_auth_token(web_dist, gateway_auth_token)
+}
+
+fn start_bff_with_gateway_auth_token(
+    web_dist: PathBuf,
+    gateway_auth_token: Option<String>,
+) -> SetupResult<StartedBff> {
+    let mut overrides = ConsoleConfigOverrides {
         bind: Some(LOOPBACK_BIND.to_owned()),
         assets_dir: Some(web_dist),
         ..ConsoleConfigOverrides::default()
     };
+    overrides.gateway.gateway_auth_token = gateway_auth_token;
     let mut config = ConsoleConfig::discover(overrides)
         .map_err(|error| io::Error::other(format!("desktop BFF configuration failed: {error}")))?;
     let listener = StdTcpListener::bind(config.bind.as_str())?;
@@ -228,6 +246,131 @@ fn is_allowed_navigation(url: &Url, address: SocketAddr) -> bool {
         && url.port_or_known_default() == Some(address.port())
 }
 
+fn discover_desktop_gateway_auth_token(
+    explicit_auth_token: Option<OsString>,
+    token_file: Option<OsString>,
+    home: Option<OsString>,
+) -> io::Result<Option<String>> {
+    if let Some(token) = explicit_auth_token {
+        return Ok(Some(token.to_string_lossy().into_owned()));
+    }
+
+    let token_path = token_file
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            home.filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .map(|path| path.join(DEFAULT_GATEWAY_TOKEN_FILE))
+        });
+    let Some(token_path) = token_path else {
+        return Ok(None);
+    };
+
+    read_private_gateway_token(&token_path)
+}
+
+fn read_private_gateway_token(path: &Path) -> io::Result<Option<String>> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(io::Error::new(
+                error.kind(),
+                format!(
+                    "failed to open gateway token file {}: {error}",
+                    path.display()
+                ),
+            ));
+        }
+    };
+    let metadata = file.metadata().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to inspect gateway token file {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    validate_private_gateway_token_file(path, &metadata)?;
+
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to read gateway token file {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    let mut lines = contents.lines();
+    let token = lines.next().filter(|line| !line.trim().is_empty());
+    if token.is_none() || lines.next().is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "gateway token file must contain exactly one non-empty line: {}",
+                path.display()
+            ),
+        ));
+    }
+    Ok(token.map(str::to_owned))
+}
+
+#[cfg(unix)]
+fn validate_private_gateway_token_file(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "gateway token path is not a regular file: {}",
+                path.display()
+            ),
+        ));
+    }
+    let mode = metadata.permissions().mode();
+    if mode & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "gateway token file must not be accessible by group or other users: {}",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn validate_private_gateway_token_file(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> io::Result<()> {
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "gateway token path is not a regular file: {}",
+                path.display()
+            ),
+        ));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        format!(
+            "gateway token file permissions cannot be verified on this platform: {}",
+            path.display()
+        ),
+    ))
+}
+
 fn random_secret() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
@@ -241,6 +384,114 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn write_private_token(path: &Path, contents: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::create_dir_all(path.parent().expect("token parent"))
+            .expect("create token directory");
+        std::fs::write(path, contents).expect("write gateway token");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .expect("secure gateway token");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_gateway_token_discovery_loads_the_private_default_file() {
+        let home = std::env::temp_dir().join(format!("ephemeral-desktop-home-{}", Uuid::new_v4()));
+        let token_path = home.join(".ephemeral-sandbox/gateway.token");
+        write_private_token(&token_path, "desktop-token\n");
+
+        let token = discover_desktop_gateway_auth_token(None, None, Some(home.clone().into()))
+            .expect("discover gateway token");
+
+        assert_eq!(token.as_deref(), Some("desktop-token"));
+        std::fs::remove_dir_all(home).expect("remove test home");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_gateway_token_discovery_honors_source_precedence() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("ephemeral-desktop-tokens-{}", Uuid::new_v4()));
+        let default_path = root.join(".ephemeral-sandbox/gateway.token");
+        let configured_path = root.join("service/gateway.token");
+        write_private_token(&default_path, "default-token\n");
+        write_private_token(&configured_path, "configured-token");
+
+        let configured = discover_desktop_gateway_auth_token(
+            None,
+            Some(configured_path.clone().into()),
+            Some(root.clone().into()),
+        )
+        .expect("configured token file");
+        assert_eq!(configured.as_deref(), Some("configured-token"));
+
+        std::fs::set_permissions(&configured_path, std::fs::Permissions::from_mode(0o644))
+            .expect("make configured token insecure");
+        let explicit = discover_desktop_gateway_auth_token(
+            Some("explicit-token".into()),
+            Some(configured_path.into()),
+            Some(root.clone().into()),
+        )
+        .expect("explicit token bypasses files");
+        assert_eq!(explicit.as_deref(), Some("explicit-token"));
+
+        std::fs::remove_dir_all(root).expect("remove token fixtures");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_gateway_token_discovery_allows_a_missing_file_only() {
+        let root = std::env::temp_dir().join(format!("ephemeral-missing-token-{}", Uuid::new_v4()));
+        let missing = root.join("gateway.token");
+
+        let token =
+            discover_desktop_gateway_auth_token(None, Some(missing.into()), Some(root.into()))
+                .expect("missing token file falls through");
+
+        assert!(token.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_gateway_token_discovery_rejects_non_private_or_non_regular_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!("ephemeral-invalid-token-{}", Uuid::new_v4()));
+        let insecure = root.join("insecure.token");
+        write_private_token(&insecure, "token\n");
+        std::fs::set_permissions(&insecure, std::fs::Permissions::from_mode(0o640))
+            .expect("make token group-readable");
+        let error = read_private_gateway_token(&insecure).expect_err("reject insecure token file");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+
+        let directory = root.join("directory.token");
+        std::fs::create_dir(&directory).expect("create non-regular token path");
+        let error = read_private_gateway_token(&directory).expect_err("reject token directory");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        std::fs::remove_dir_all(root).expect("remove invalid token fixtures");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_gateway_token_discovery_requires_one_non_empty_line() {
+        let root = std::env::temp_dir().join(format!("ephemeral-token-lines-{}", Uuid::new_v4()));
+        let token_path = root.join("gateway.token");
+
+        for contents in ["", "\n", " \n", "first\nsecond\n", "first\n\n"] {
+            write_private_token(&token_path, contents);
+            let error = read_private_gateway_token(&token_path)
+                .expect_err("reject malformed gateway token file");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{contents:?}");
+        }
+
+        std::fs::remove_dir_all(root).expect("remove malformed token fixtures");
+    }
 
     #[test]
     fn generated_secrets_are_high_entropy_cookie_and_url_values() {
@@ -281,6 +532,34 @@ mod tests {
         std::fs::write(root.join("index.html"), "<!doctype html>").expect("write test entry point");
         let resolved = validate_web_dist(&root).expect("valid web resource");
         assert_eq!(resolved, root.canonicalize().expect("canonical test path"));
+        std::fs::remove_dir_all(root).expect("remove test resource directory");
+    }
+
+    #[test]
+    fn desktop_lifecycle_cancels_the_in_process_bff() {
+        let root = std::env::temp_dir().join(format!("ephemeral-bff-assets-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("create test resource directory");
+        std::fs::write(root.join("index.html"), "<!doctype html>").expect("write test entry point");
+
+        let StartedBff {
+            address,
+            bootstrap_url: _,
+            shutdown,
+            server_task,
+        } = start_bff_with_gateway_auth_token(root.clone(), Some("test-gateway-token".to_owned()))
+            .expect("start desktop BFF");
+        let lifecycle = BffLifecycle::default();
+        lifecycle
+            .install(shutdown, server_task)
+            .expect("install desktop BFF lifecycle");
+        lifecycle.request_shutdown();
+        lifecycle
+            .wait_for_server()
+            .expect("desktop BFF exits cleanly");
+
+        assert!(
+            std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_err()
+        );
         std::fs::remove_dir_all(root).expect("remove test resource directory");
     }
 

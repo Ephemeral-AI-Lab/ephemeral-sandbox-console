@@ -3,6 +3,7 @@
 
 use sandbox_operation_client::GatewayClient;
 
+use crate::assets::AssetCachePolicy;
 use crate::auth::DesktopSessionAuth;
 use crate::config::ConsoleConfig;
 use crate::endpoint::EndpointCache;
@@ -13,11 +14,13 @@ pub struct AppState {
     pub endpoints: EndpointCache,
     pub config: ConsoleConfig,
     pub desktop_auth: Option<DesktopSessionAuth>,
+    pub(crate) asset_cache: AssetCachePolicy,
 }
 
 impl AppState {
     #[must_use]
     pub fn new(config: ConsoleConfig) -> Self {
+        let asset_cache = AssetCachePolicy::load(config.assets_dir.as_deref());
         let gateway = GatewayClient::new(
             config.gateway.gateway_socket_path.to_string_lossy(),
             config.gateway.gateway_auth_token.clone(),
@@ -27,6 +30,7 @@ impl AppState {
             endpoints: EndpointCache::new(config.endpoint_cache_ttl),
             config,
             desktop_auth: None,
+            asset_cache,
         }
     }
 

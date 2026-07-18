@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { GitBranch, PanelLeft } from "lucide-react";
+import { PanelLeft } from "lucide-react";
 import {
   Box,
   Breadcrumbs,
@@ -13,7 +13,6 @@ import {
   Select,
   Stack,
   Text,
-  Tooltip,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { useSandbox } from "@/pages/sandbox/SandboxContext";
@@ -34,10 +33,9 @@ export function FilesTab() {
   const narrow = useMediaQuery("(max-width: 47.99em)");
   const path = searchParams.get("path") ?? "";
   const session = searchParams.get("session");
-  const blameOn = searchParams.get("blame") === "1";
   const workspaces = snapshot?.sandboxes[0]?.workspaces ?? [];
 
-  const apply = (next: { path?: string | null; session?: string | null; blame?: boolean }) => {
+  const apply = (next: { path?: string | null; session?: string | null }) => {
     const params = new URLSearchParams(searchParams);
     if (next.path !== undefined) {
       if (next.path) params.set("path", next.path);
@@ -47,16 +45,12 @@ export function FilesTab() {
       if (next.session) params.set("session", next.session);
       else params.delete("session");
     }
-    if (next.blame !== undefined) {
-      if (next.blame) params.set("blame", "1");
-      else params.delete("blame");
-    }
     setSearchParams(params, { replace: true });
   };
 
   const navigator = (
     <FileNavigator
-      onScopeChange={(value) => apply({ session: value === PUBLISHED ? null : value ?? null, blame: false })}
+      onScopeChange={(value) => apply({ session: value === PUBLISHED ? null : value ?? null })}
       onSelect={(selected) => {
         apply({ path: selected });
         setNavigatorOpen(false);
@@ -97,7 +91,7 @@ export function FilesTab() {
 
       <Flex direction="column" mih={0} miw={0} style={{ flex: 1 }}>
         <Paper component="header" data-files-toolbar px="md" py="sm" radius={0} withBorder>
-          <Group justify="space-between" wrap="wrap">
+          <Group wrap="wrap">
             <Group gap="sm" wrap="nowrap">
               {narrow ? (
                 <Button
@@ -122,24 +116,6 @@ export function FilesTab() {
                 </Breadcrumbs>
               </Box>
             </Group>
-            <Tooltip
-              label={
-                session
-                  ? "Blame reads the published auditability log. Switch to the published snapshot to use it."
-                  : "Color each line by its owner from the publish auditability log."
-              }
-              openDelay={300}
-            >
-              <Button
-                aria-pressed={blameOn}
-                disabled={session !== null}
-                leftSection={<GitBranch size={13} />}
-                onClick={() => apply({ blame: !blameOn })}
-                variant={blameOn ? "filled" : "default"}
-              >
-                Blame
-              </Button>
-            </Tooltip>
           </Group>
         </Paper>
 
@@ -149,13 +125,13 @@ export function FilesTab() {
               <Text fw={600} size="sm">Pick a file</Text>
               <Text c="dimmed" mt="xs" size="xs">
                 Browse the {session ? "live session workspace" : "published snapshot"} from the file navigator.
-                Blame is available in published scope.
+                Published files show blame automatically.
               </Text>
             </Paper>
           </Center>
         ) : (
           <FileView
-            blameOn={blameOn && session === null}
+            blameOn={session === null}
             key={`${session ?? "published"}:${path}`}
             path={path}
             sandboxId={sandboxId}

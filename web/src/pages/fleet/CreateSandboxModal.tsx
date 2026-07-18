@@ -12,6 +12,7 @@ import { listDockerImages } from "@/api/hostResources";
 import { rpcStream, systemScope } from "@/api/rpc";
 import { useErrorToast } from "@/components/ErrorToast";
 import { WorkspacePicker } from "@/pages/fleet/WorkspacePicker";
+import classes from "@/pages/fleet/CreateSandboxModal.module.css";
 
 function defaultValues(spec: OperationSpecDoc | undefined): Record<string, string> {
   const values: Record<string, string> = {};
@@ -28,8 +29,10 @@ function defaultValues(spec: OperationSpecDoc | undefined): Record<string, strin
  * card, the web equivalent of the CLI's `--progress`.
  */
 export function CreateSandboxModal({
+  compactOnNarrow = false,
   onStream,
 }: {
+  compactOnNarrow?: boolean;
   onStream: (logs: string[] | null) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -95,39 +98,41 @@ export function CreateSandboxModal({
         disabled={busy}
         onClick={openModal}
       >
-        {busy ? (
-          "Creating…"
-        ) : (
+        {busy ? "Creating…" : compactOnNarrow ? (
           <>
             <span data-new-label-full>New Sandbox</span>
             <span data-new-label-short>New</span>
           </>
-        )}
+        ) : "New Sandbox"}
       </Button>
       <Modal.Root
         opened={open}
         onClose={() => setOpen(false)}
         closeOnEscape={!workspacePickerOpen}
         centered
+        size="lg"
         transitionProps={{ duration: 0 }}
       >
         <Modal.Overlay />
-        <Modal.Content>
-          <Modal.Body>
-            <Group justify="space-between" mb="md" wrap="nowrap">
-              <Modal.Title>Create sandbox</Modal.Title>
-              <Modal.CloseButton aria-label="Close create sandbox" />
-            </Group>
-            <Text size="sm" c="dimmed" mb="md">
-              {spec?.summary ?? "Create a host-side sandbox record and runtime sandbox."}
-            </Text>
+        <Modal.Content className={classes.content} data-create-sandbox-modal>
+          <Modal.Header className={classes.header} component="div">
+            <div className={classes.heading}>
+              <Modal.Title className={classes.title}>Create sandbox</Modal.Title>
+              <Text className={classes.summary} size="sm" c="dimmed">
+                {spec?.summary ?? "Create a host-side sandbox record and runtime sandbox."}
+              </Text>
+            </div>
+            <Modal.CloseButton aria-label="Close create sandbox" size="md" />
+          </Modal.Header>
+          <Modal.Body className={classes.body}>
             <form
+              className={classes.form}
               onSubmit={(event) => {
                 event.preventDefault();
                 void submit();
               }}
             >
-              <Stack gap="sm">
+              <Stack className={classes.fields} gap="lg">
                 {(spec?.args ?? []).map((arg) => {
                   const error =
                     errors[arg.name] ??
@@ -140,6 +145,7 @@ export function CreateSandboxModal({
                   return (
                     <Input.Wrapper
                       key={arg.name}
+                      className={classes.field}
                       id={`create-${arg.name}`}
                       label={<Text component="span" ff="monospace" size="sm">{arg.name}</Text>}
                       required={arg.required}
@@ -157,6 +163,7 @@ export function CreateSandboxModal({
                           placeholder={
                             images.isPending ? "Loading Docker images…" : "Select a Docker image"
                           }
+                          size="md"
                           disabled={
                             images.isPending ||
                             images.isError ||
@@ -180,6 +187,7 @@ export function CreateSandboxModal({
                           step={arg.name === "count" ? 1 : undefined}
                           inputMode={arg.name === "count" ? "numeric" : undefined}
                           value={values[arg.name] ?? ""}
+                          size="md"
                           onChange={(event) =>
                             setValues((current) => ({
                               ...current,
@@ -192,15 +200,15 @@ export function CreateSandboxModal({
                     </Input.Wrapper>
                   );
                 })}
-                <Group justify="flex-end" mt="xs">
-                  <Button variant="subtle" onClick={() => setOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button variant="filled" type="submit" disabled={!spec}>
-                    Create
-                  </Button>
-                </Group>
               </Stack>
+              <Group className={classes.actions} justify="flex-end" gap="sm">
+                <Button size="sm" variant="subtle" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <Button size="sm" variant="filled" type="submit" disabled={!spec}>
+                  Create sandbox
+                </Button>
+              </Group>
             </form>
           </Modal.Body>
         </Modal.Content>

@@ -133,6 +133,7 @@ export function Shell() {
   return (
     <DashboardShellContext.Provider value={shellState}>
       <AppShell
+        className={styles.shell}
         data-console-shell
         data-dashboard-shell={isDashboard || undefined}
         header={{
@@ -210,21 +211,7 @@ export function Shell() {
             </Group>
 
             {isDashboard ? (
-              <>
-                <nav aria-label="Primary navigation" className={styles.dashboardNav}>
-                  <Anchor
-                    aria-current="page"
-                    className={styles.dashboardNavLink}
-                    component={Link}
-                    to="/"
-                    underline="never"
-                    visibleFrom="sm"
-                  >
-                    Dashboard
-                  </Anchor>
-                </nav>
-                <CreateSandboxModal onStream={setCreateLogs} />
-              </>
+              <CreateSandboxModal compactOnNarrow onStream={setCreateLogs} />
             ) : null}
           </Group>
         </AppShell.Header>

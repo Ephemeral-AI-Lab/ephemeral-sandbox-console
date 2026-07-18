@@ -1,4 +1,5 @@
 import type { CommandOutput, CommandStatus } from "@/api/types";
+import { stripTerminalControlSequences } from "@/lib/terminalText";
 
 /**
  * The command ledger is client-remembered: no listing op exists, so known
@@ -65,7 +66,9 @@ export function entryFromExec(
     status: output.status,
     exitCode: output.exit_code,
     endedAt: running ? null : Date.now(),
-    inlineOutput: output.command_session_id ? null : output.output,
+    inlineOutput: output.command_session_id
+      ? null
+      : stripTerminalControlSequences(output.output),
     publishRejected: output.publish_rejected === true,
     publishRejectClass: output.publish_reject_class ?? null,
   };
@@ -144,7 +147,7 @@ export function absorbOutput(
   output: CommandOutput,
 ): TranscriptState {
   if (output.end_offset > output.start_offset && output.output.length > 0) {
-    const incoming = output.output.split("\n");
+    const incoming = stripTerminalControlSequences(output.output).split("\n");
     const start = Number(output.start_offset);
     for (let index = 0; index < incoming.length; index += 1) {
       state.lines[start + index] = incoming[index];
