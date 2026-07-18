@@ -7,7 +7,9 @@ const iframeTitle = `preview of ${SANDBOX_ID} port 5173`;
 
 async function waitForLogo(page: Page) {
   await page.waitForFunction(() => {
-    const logo = document.querySelector('img[src="/assets/images/logo.png"]');
+    const logo = document.querySelector(
+      'img[src="/brand/ephemeral-sandbox-mascot-b9408770.png"]',
+    );
     return logo instanceof HTMLImageElement && logo.complete && logo.naturalWidth > 0;
   });
 }

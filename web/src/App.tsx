@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router";
 import { AppProviders } from "@/AppProviders";
 import { Shell } from "@/shell/Shell";
-import { FleetBoard } from "@/pages/fleet/FleetBoard";
+import { DashboardPage } from "@/pages/dashboard/DashboardPage";
 import { NotFound } from "@/pages/NotFound";
 import { SandboxDetail } from "@/pages/sandbox/SandboxDetail";
 import { TerminalTab } from "@/pages/sandbox/terminal/TerminalTab";
@@ -36,7 +36,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<Shell />}>
-            <Route index element={<FleetBoard />} />
+            <Route index element={<DashboardPage />} />
             <Route path="sandboxes/:sandboxId" element={<SandboxDetail />}>
               <Route index element={<Navigate to="terminal" replace />} />
               <Route path="terminal" element={<TerminalTab />} />

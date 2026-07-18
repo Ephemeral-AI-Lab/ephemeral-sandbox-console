@@ -11,7 +11,7 @@ const STANDARD_VIEWPORTS = [
 async function openFixture(page: Page) {
   await page.goto("/p02-foundation.html");
   await expect(page.getByRole("heading", { name: "Shared provider, stable legacy surface" })).toBeVisible();
-  await expect(page.getByRole("banner")).toContainText("EphemeralOS");
+  await expect(page.getByRole("banner")).toContainText("Ephemeral Sandbox");
 }
 
 for (const [width, height] of STANDARD_VIEWPORTS) {

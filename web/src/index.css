@@ -1,3 +1,25 @@
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/fonts/inter-latin-100-900-v5.2.8.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("/fonts/jetbrains-mono-latin-100-800-v5.2.8.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 *,
 *::before,
 *::after {
@@ -158,85 +180,10 @@ body {
   overflow: auto;
 }
 
-[data-fleet-board] {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-}
-
-[data-fleet-toolbar],
-[data-fleet-summary] {
-  background: var(--mantine-color-body);
-  border-bottom: 1px solid var(--mantine-color-neutral-3);
-  flex: 0 0 auto;
-}
-
-[data-fleet-toolbar] {
-  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
-}
-
-[data-fleet-card-collection] {
-  align-items: flex-start;
-  justify-content: flex-start;
-}
-
-[data-fleet-card],
-[data-fleet-creation-card] {
-  box-sizing: border-box;
-  flex: 0 0 100%;
-  min-width: 0;
-  overflow: hidden;
-  width: 100%;
-}
-
-[data-fleet-card] {
-  display: flex;
-  flex-direction: column;
-  height: auto;
-  max-height: none;
-}
-
-[data-fleet-creation-card] {
-  border: 1px dashed var(--mantine-color-eyeBlue-5);
-  border-radius: var(--mantine-radius-md);
-  height: 22rem;
-  max-height: 22rem;
-  padding: var(--mantine-spacing-md);
-}
-
-[data-fleet-workspace],
-[data-fleet-activity] {
-  background: var(--mantine-color-neutral-0);
-  border: 1px solid var(--mantine-color-neutral-3);
-  border-radius: var(--mantine-radius-sm);
-  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
-}
-
-[data-fleet-resources] {
-  border-top: 1px solid var(--mantine-color-neutral-3);
-  padding-top: var(--mantine-spacing-xs);
-}
-
-[data-fleet-resource] svg {
-  display: block;
-  margin-top: 2px;
-  width: 100%;
-}
-
 [data-workspace-option-viewport] {
   height: 16rem;
   max-height: 16rem;
   overflow: auto;
-}
-
-@media (min-width: 48em) {
-  [data-fleet-card],
-  [data-fleet-creation-card] {
-    flex: 0 1 28rem;
-    width: min(28rem, 100%);
-  }
 }
 
 [data-observability-content] {

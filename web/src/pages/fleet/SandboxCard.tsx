@@ -1,188 +1,135 @@
-import { Link, useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Trash2 } from "lucide-react";
-import { Alert, Box, Button, Card, Group, SimpleGrid, Stack, Text } from "@mantine/core";
-import { rpcStream, systemScope } from "@/api/rpc";
+import { useId } from "react";
+import { Button } from "@mantine/core";
+import { Link } from "react-router";
+import type { SandboxSnapshot } from "@/api/observability";
 import type { SandboxRecord } from "@/api/types";
-import { inFlightCount, type SandboxSnapshot } from "@/api/observability";
-import { formatMegabytes } from "@/lib/format";
-import type { SandboxCurrentUsage } from "@/poll/useFleetCurrentUsage";
-import { ConfirmDestroyDialog } from "@/components/ConfirmDestroyDialog";
-import { HealthDot } from "@/components/HealthDot";
-import { StateBadge } from "@/components/StateBadge";
+import { DestroyAction } from "@/components/DestroyAction";
 import { StreamLogPane } from "@/components/StreamLogPane";
-import { useErrorToast } from "@/components/ErrorToast";
+import { sandboxCardViewModel } from "@/core/fleet";
+import type { SandboxCurrentUsage } from "@/core/resources";
+import { formatBytes } from "@/lib/format";
+import styles from "@/pages/dashboard/DashboardPage.module.css";
 
-export function SandboxCard({
-  record,
-  snapshot,
-  usage,
-  createLogs,
-}: {
-  record: SandboxRecord;
-  snapshot: SandboxSnapshot | undefined;
-  usage: SandboxCurrentUsage | undefined;
-  createLogs: string[] | undefined;
-}) {
-  const navigate = useNavigate();
-  const sessions = snapshot?.workspaces.length ?? 0;
-  const commands = snapshot ? inFlightCount(snapshot) : 0;
+const UNKNOWN = "—";
 
-  return (
-    <Card component="article" data-fleet-card padding="md" radius="md" shadow="sm" withBorder>
-      <Card.Section inheritPadding py="sm" withBorder>
-        <Group gap="xs" wrap="nowrap">
-          <Text
-            component={Link}
-            ff="monospace"
-            fw={700}
-            size="sm"
-            to={`/sandboxes/${encodeURIComponent(record.id)}`}
-            truncate
-            style={{ flex: 1, minWidth: 0 }}
-          >
-            {record.id}
-          </Text>
-          <StateBadge state={record.state} />
-          {record.state === "ready" ? <HealthDot endpoint={record.daemon_http} /> : null}
-        </Group>
-      </Card.Section>
-
-      <Stack gap="sm" mt="sm">
-        <Box data-fleet-workspace>
-          <Text c="dimmed" fw={700} size="xs" tt="uppercase">Workspace</Text>
-          <Text ff="monospace" size="xs" title={record.workspace_root} truncate>
-            {record.workspace_root}
-          </Text>
-        </Box>
-
-        {record.state === "creating" ? (
-          <StreamLogPane lines={createLogs ?? []} maxHeight={128} />
-        ) : null}
-
-        {record.state === "failed" ? (
-          <Alert color="danger" variant="light">
-            Sandbox failed to reach ready. Inspect the record for endpoint and state details.
-          </Alert>
-        ) : null}
-
-        {record.state === "ready" ? (
-          <Stack gap="sm">
-            <Box data-fleet-activity>
-              <Group align="center" justify="space-between" wrap="nowrap">
-                <Text c="dimmed" fw={700} size="xs" tt="uppercase">Activity</Text>
-                <Text size="sm" truncate>
-                  {sessions} {sessions === 1 ? "session" : "sessions"} · {commands}{" "}
-                  {commands === 1 ? "cmd" : "cmds"}
-                </Text>
-              </Group>
-            </Box>
-            <Box data-fleet-resources>
-              <Text c="dimmed" fw={700} size="xs" tt="uppercase">Current usage</Text>
-              <SimpleGrid cols={2} mt="xs" spacing="sm">
-                <ResourceMetric
-                  label="CPU"
-                  value={usage?.cpuPercent == null
-                    ? "–"
-                    : `${usage.cpuPercent.toFixed(usage.cpuPercent < 1 ? 2 : 1)}%`}
-                />
-                <ResourceMetric
-                  label="Memory"
-                  value={usage?.memoryBytes == null ? "–" : formatMegabytes(usage.memoryBytes)}
-                />
-              </SimpleGrid>
-            </Box>
-          </Stack>
-        ) : null}
-      </Stack>
-
-      <Card.Section inheritPadding mt="sm" py="sm" withBorder>
-        <Group gap="xs" justify="space-between">
-          <Group gap="xs">
-            {record.state === "ready" ? (
-              <Button
-                size="sm"
-                variant="filled"
-                onClick={() => void navigate(`/sandboxes/${encodeURIComponent(record.id)}`)}
-              >
-                Open
-              </Button>
-            ) : null}
-            {record.state === "failed" ? (
-              <Button
-                size="sm"
-                onClick={() => void navigate(`/sandboxes/${encodeURIComponent(record.id)}`)}
-              >
-                Inspect
-              </Button>
-            ) : null}
-          </Group>
-          <DestroyAction sandboxId={record.id} />
-        </Group>
-      </Card.Section>
-    </Card>
-  );
+function formatCpu(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return UNKNOWN;
+  return `${value.toFixed(value < 1 ? 2 : 1)}%`;
 }
 
 function ResourceMetric({ label, value }: { label: string; value: string }) {
   return (
-    <Box data-fleet-resource>
-      <Group gap="xs" justify="space-between" wrap="nowrap">
-        <Text c="dimmed" size="xs">{label}</Text>
-        <Text fw={700} size="sm">{value}</Text>
-      </Group>
-    </Box>
+    <div className={styles.resourceMetric} data-fleet-resource>
+      <span className={styles.metadataLabel}>{label}</span>
+      <span className={styles.resourceValue}>{value}</span>
+    </div>
   );
 }
 
-function DestroyAction({ sandboxId }: { sandboxId: string }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
-  const { showError } = useErrorToast();
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-
-  const destroy = async () => {
-    setBusy(true);
-    setLogs([]);
-    try {
-      await rpcStream(
-        "destroy_sandbox",
-        systemScope,
-        { sandbox_id: sandboxId },
-        (line) => setLogs((current) => [...current, line]),
-      );
-      setOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["fleet"] });
-      void navigate("/");
-    } catch (error) {
-      showError(error);
-    } finally {
-      setBusy(false);
-    }
-  };
+export function SandboxCard({
+  createLogs,
+  record,
+  snapshot,
+  usage,
+}: {
+  createLogs: string[] | undefined;
+  record: SandboxRecord;
+  snapshot: SandboxSnapshot | undefined;
+  usage: SandboxCurrentUsage | undefined;
+}) {
+  const titleId = useId();
+  const view = sandboxCardViewModel(record, snapshot, usage);
+  const destination = `/sandboxes/${encodeURIComponent(record.id)}`;
+  const progressLabel =
+    view.lifecycleState === "creating"
+      ? "Creating…"
+      : view.lifecycleState === "stopping"
+        ? "Stopping…"
+        : null;
 
   return (
-    <ConfirmDestroyDialog
-      sandboxId={sandboxId}
-      open={open}
-      onOpenChange={setOpen}
-      onConfirm={() => void destroy()}
-      busy={busy}
-      logLines={logs}
-      trigger={(open) => (
-        <Button
-          size="compact-xs"
-          color="danger"
-          variant="filled"
-          aria-label={`Destroy ${sandboxId}`}
-          onClick={open}
-        >
-          <Trash2 size={12} />
-        </Button>
-      )}
-    />
+    <article
+      aria-labelledby={titleId}
+      className={styles.sandboxCard}
+      data-fleet-card
+      data-status-tone={view.status.tone}
+    >
+      <div className={styles.cardBody}>
+        <header className={styles.cardHeader}>
+          <span
+            className={styles.idChip}
+            id={titleId}
+            title={record.id}
+          >
+            {record.id}
+          </span>
+          <span
+            className={styles.statusBadge}
+            data-pulse={view.status.pulse || undefined}
+          >
+            <span aria-hidden className={styles.statusDot} />
+            {view.status.label}
+          </span>
+        </header>
+
+        <div className={styles.workspace} data-fleet-workspace>
+          <div className={styles.metadataLabel}>Workspace</div>
+          <div className={styles.workspacePath} title={view.workspaceRoot}>
+            {view.workspaceRoot || UNKNOWN}
+          </div>
+        </div>
+
+        <div className={styles.resourceGrid} data-fleet-resources>
+          <ResourceMetric label="CPU" value={formatCpu(view.cpuPercent)} />
+          <ResourceMetric
+            label="MEM"
+            value={view.memoryBytes === null ? UNKNOWN : formatBytes(view.memoryBytes)}
+          />
+          <ResourceMetric
+            label="SESSIONS"
+            value={view.sessions === null ? UNKNOWN : String(view.sessions)}
+          />
+          <ResourceMetric
+            label="ACTIVE CMDS"
+            value={
+              view.activeCommands === null ? UNKNOWN : String(view.activeCommands)
+            }
+          />
+        </div>
+
+        {view.lifecycleState === "creating" ? (
+          <div className={styles.streamLog}>
+            <StreamLogPane lines={createLogs ?? []} maxHeight={86} />
+          </div>
+        ) : null}
+
+        {view.lifecycleState === "failed" ? (
+          <p className={styles.lifecycleNote}>
+            Sandbox failed to reach ready. Inspect its record for details.
+          </p>
+        ) : null}
+
+        <footer className={styles.cardActions}>
+          {progressLabel ? (
+            <Button className={styles.primaryAction} disabled variant="light">
+              {progressLabel}
+            </Button>
+          ) : view.primaryAction ? (
+            <Button
+              className={styles.primaryAction}
+              component={Link}
+              disabled={view.primaryAction.disabled}
+              to={destination}
+              variant={view.primaryAction.kind === "open" ? "filled" : "light"}
+            >
+              {view.primaryAction.label}
+            </Button>
+          ) : (
+            <span />
+          )}
+          <DestroyAction sandboxId={record.id} touchTarget />
+        </footer>
+      </div>
+    </article>
   );
 }

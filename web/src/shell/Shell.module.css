@@ -1,0 +1,171 @@
+.header {
+  border-bottom: 1px solid rgb(137 108 88 / 24%);
+  box-shadow: 0 10px 30px rgb(39 31 28 / 7%);
+  color: var(--mantine-color-neutral-9);
+}
+
+.dashboardHeader {
+  background: rgb(255 250 245 / 90%);
+  backdrop-filter: blur(12px);
+}
+
+.detailHeader {
+  background: var(--mantine-color-white);
+}
+
+.headerInner {
+  height: 100%;
+  margin-inline: auto;
+  max-width: 1536px;
+  padding-inline: clamp(16px, 2.5vw, 40px);
+}
+
+.brandLink {
+  color: var(--mantine-color-neutral-9);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.brandName {
+  font-size: clamp(0.94rem, 1.5vw, 1.14rem);
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+.consolePill {
+  align-items: center;
+  background: rgb(242 233 222 / 80%);
+  border: 1px solid rgb(137 108 88 / 26%);
+  border-radius: 999px;
+  color: #5f493c;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 0.72rem;
+  font-weight: 700;
+  gap: 7px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  min-height: 30px;
+  padding: 7px 10px;
+  text-transform: uppercase;
+}
+
+.connectionDot {
+  background: var(--connection-color);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--connection-color) 16%, transparent);
+  height: 7px;
+  width: 7px;
+}
+
+.connectionDot[data-connection="connecting"] {
+  --connection-color: #896c58;
+}
+
+.connectionDot[data-connection="connected"] {
+  --connection-color: #10b981;
+}
+
+.connectionDot[data-connection="stale"] {
+  --connection-color: #b06c0c;
+}
+
+.connectionDot[data-connection="disconnected"] {
+  --connection-color: #ba1a1a;
+}
+
+.dashboardNav {
+  align-items: center;
+  align-self: stretch;
+  display: flex;
+  margin-inline: auto;
+}
+
+.dashboardNavLink {
+  align-items: center;
+  color: #3e6077;
+  display: inline-flex;
+  font-size: 0.93rem;
+  font-weight: 700;
+  height: 100%;
+  padding-inline: 16px;
+  position: relative;
+  text-decoration: none;
+}
+
+.dashboardNavLink::after {
+  background: #3e6077;
+  border-radius: 999px 999px 0 0;
+  bottom: 0;
+  content: "";
+  height: 3px;
+  left: 16px;
+  position: absolute;
+  right: 16px;
+}
+
+.dashboardNavLink:focus-visible,
+.brandLink:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #3e6077;
+  outline-offset: 3px;
+}
+
+.header :global([data-new-sandbox-trigger]) {
+  box-shadow: 0 5px 14px rgb(62 96 119 / 18%);
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+
+.header :global([data-new-label-short]) {
+  display: none;
+}
+
+.dashboardMain {
+  height: calc(100dvh - 80px);
+}
+
+.detailMain {
+  height: calc(100dvh - 44px);
+}
+
+@media (max-width: 47.99em) {
+  .dashboardMain {
+    height: calc(100dvh - 64px);
+  }
+
+  .headerInner {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+
+  .consolePill {
+    min-height: 28px;
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 26.24em) {
+  .brandName {
+    font-size: 0.9rem;
+  }
+
+  .header :global([data-new-label-full]) {
+    display: none;
+  }
+
+  .header :global([data-new-label-short]) {
+    display: inline;
+  }
+
+  .header :global([data-new-sandbox-trigger]) {
+    padding-inline: 10px;
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .dashboardHeader {
+    background: rgb(255 250 245 / 98%);
+  }
+}

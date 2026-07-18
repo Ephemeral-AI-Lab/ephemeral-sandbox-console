@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["server"]
+members = ["server", "desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -60,4 +60,3 @@ codegen-units = 256
 incremental = true
 debug = 0
 strip = true
-

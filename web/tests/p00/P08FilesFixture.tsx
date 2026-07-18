@@ -5,7 +5,7 @@ import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router";
 import { FilesTab } from "../../src/pages/sandbox/files/FilesTab";
-import { ephemeralosTheme } from "../../src/theme";
+import { ephemeralSandboxTheme } from "../../src/theme";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "../../src/index.css";
@@ -45,7 +45,7 @@ function Fixture() {
     [],
   );
   return (
-    <MantineProvider forceColorScheme="light" theme={ephemeralosTheme}>
+    <MantineProvider forceColorScheme="light" theme={ephemeralSandboxTheme}>
       <Notifications limit={4} position="bottom-right" />
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[`/files${search}`]}>

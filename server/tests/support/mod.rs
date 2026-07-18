@@ -9,6 +9,7 @@ use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
+use sandbox_console::auth::DesktopSessionAuth;
 use sandbox_console::config::ConsoleConfig;
 use sandbox_console::server;
 use sandbox_console::state::AppState;
@@ -264,6 +265,15 @@ pub async fn spawn_console(
     assets_dir: Option<PathBuf>,
     rpc_timeout: Duration,
 ) -> SocketAddr {
+    spawn_console_with_desktop_auth(gateway_addr, assets_dir, rpc_timeout, None).await
+}
+
+pub async fn spawn_console_with_desktop_auth(
+    gateway_addr: SocketAddr,
+    assets_dir: Option<PathBuf>,
+    rpc_timeout: Duration,
+    credentials: Option<(&str, &str)>,
+) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind console");
@@ -283,7 +293,13 @@ pub async fn spawn_console(
         endpoint_resolve_timeout: Duration::from_secs(5),
         endpoint_cache_ttl: Duration::from_secs(3),
     };
-    tokio::spawn(server::serve(listener, AppState::new(config)));
+    let mut state = AppState::new(config);
+    if let Some((nonce, token)) = credentials {
+        let auth = DesktopSessionAuth::new(&addr.to_string(), nonce.to_owned(), token.to_owned())
+            .expect("valid desktop test auth");
+        state = state.with_desktop_auth(auth);
+    }
+    tokio::spawn(server::serve(listener, state));
     addr
 }
 

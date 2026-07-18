@@ -87,98 +87,124 @@ export function CreateSandboxModal({
 
   return (
     <>
-      <Button leftSection={<Plus size={14} />} variant="filled" disabled={busy} onClick={openModal}>
-        {busy ? "Creating…" : "New Sandbox"}
+      <Button
+        aria-label="New Sandbox"
+        data-new-sandbox-trigger
+        leftSection={<Plus aria-hidden size={16} />}
+        variant="filled"
+        disabled={busy}
+        onClick={openModal}
+      >
+        {busy ? (
+          "Creating…"
+        ) : (
+          <>
+            <span data-new-label-full>New Sandbox</span>
+            <span data-new-label-short>New</span>
+          </>
+        )}
       </Button>
-      <Modal
+      <Modal.Root
         opened={open}
         onClose={() => setOpen(false)}
         closeOnEscape={!workspacePickerOpen}
-        closeButtonProps={{ "aria-label": "Close create sandbox" }}
-        title="Create sandbox"
         centered
+        transitionProps={{ duration: 0 }}
       >
-        <Text size="sm" c="dimmed" mb="md">
-          {spec?.summary ?? "Create a host-side sandbox record and runtime sandbox."}
-        </Text>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <Stack gap="sm">
-            {(spec?.args ?? []).map((arg) => {
-              const error =
-                errors[arg.name] ??
-                (arg.name === "image" && images.isError
-                  ? (images.error as Error).message
-                  : arg.name === "image" && images.data?.length === 0
-                    ? "No Docker images are available."
-                    : undefined);
-
-              return (
-                <Input.Wrapper
-                  key={arg.name}
-                  id={`create-${arg.name}`}
-                  label={<Text component="span" ff="monospace" size="sm">{arg.name}</Text>}
-                  required={arg.required}
-                  description={error ? undefined : arg.help}
-                  error={error}
-                >
-                  {arg.name === "image" ? (
-                    <Select
-                      id={`create-${arg.name}`}
-                      value={values[arg.name] ?? ""}
-                      onChange={(value) =>
-                        setValues((current) => ({ ...current, [arg.name]: value ?? "" }))
-                      }
-                      data={images.data ?? []}
-                      placeholder={images.isPending ? "Loading Docker images…" : "Select a Docker image"}
-                      disabled={
-                        images.isPending || images.isError || (images.data?.length ?? 0) === 0
-                      }
-                    />
-                  ) : arg.name === "workspace_root" ? (
-                    <WorkspacePicker
-                      id={`create-${arg.name}`}
-                      value={values[arg.name] ?? ""}
-                      onOpenChange={setWorkspacePickerOpen}
-                      onChange={(path) =>
-                        setValues((current) => ({ ...current, [arg.name]: path }))
-                      }
-                    />
-                  ) : (
-                    <TextInput
-                      id={`create-${arg.name}`}
-                      type={arg.name === "count" ? "number" : undefined}
-                      min={arg.name === "count" ? 1 : undefined}
-                      step={arg.name === "count" ? 1 : undefined}
-                      inputMode={arg.name === "count" ? "numeric" : undefined}
-                      value={values[arg.name] ?? ""}
-                      onChange={(event) =>
-                        setValues((current) => ({
-                          ...current,
-                          [arg.name]: event.target.value,
-                        }))
-                      }
-                      placeholder={arg.help}
-                    />
-                  )}
-                </Input.Wrapper>
-              );
-            })}
-            <Group justify="flex-end" mt="xs">
-              <Button variant="subtle" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
-              <Button variant="filled" type="submit" disabled={!spec}>
-                Create
-              </Button>
+        <Modal.Overlay />
+        <Modal.Content>
+          <Modal.Body>
+            <Group justify="space-between" mb="md" wrap="nowrap">
+              <Modal.Title>Create sandbox</Modal.Title>
+              <Modal.CloseButton aria-label="Close create sandbox" />
             </Group>
-          </Stack>
-        </form>
-      </Modal>
+            <Text size="sm" c="dimmed" mb="md">
+              {spec?.summary ?? "Create a host-side sandbox record and runtime sandbox."}
+            </Text>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit();
+              }}
+            >
+              <Stack gap="sm">
+                {(spec?.args ?? []).map((arg) => {
+                  const error =
+                    errors[arg.name] ??
+                    (arg.name === "image" && images.isError
+                      ? (images.error as Error).message
+                      : arg.name === "image" && images.data?.length === 0
+                        ? "No Docker images are available."
+                        : undefined);
+
+                  return (
+                    <Input.Wrapper
+                      key={arg.name}
+                      id={`create-${arg.name}`}
+                      label={<Text component="span" ff="monospace" size="sm">{arg.name}</Text>}
+                      required={arg.required}
+                      description={error ? undefined : arg.help}
+                      error={error}
+                    >
+                      {arg.name === "image" ? (
+                        <Select
+                          id={`create-${arg.name}`}
+                          value={values[arg.name] ?? ""}
+                          onChange={(value) =>
+                            setValues((current) => ({ ...current, [arg.name]: value ?? "" }))
+                          }
+                          data={images.data ?? []}
+                          placeholder={
+                            images.isPending ? "Loading Docker images…" : "Select a Docker image"
+                          }
+                          disabled={
+                            images.isPending ||
+                            images.isError ||
+                            (images.data?.length ?? 0) === 0
+                          }
+                        />
+                      ) : arg.name === "workspace_root" ? (
+                        <WorkspacePicker
+                          id={`create-${arg.name}`}
+                          value={values[arg.name] ?? ""}
+                          onOpenChange={setWorkspacePickerOpen}
+                          onChange={(path) =>
+                            setValues((current) => ({ ...current, [arg.name]: path }))
+                          }
+                        />
+                      ) : (
+                        <TextInput
+                          id={`create-${arg.name}`}
+                          type={arg.name === "count" ? "number" : undefined}
+                          min={arg.name === "count" ? 1 : undefined}
+                          step={arg.name === "count" ? 1 : undefined}
+                          inputMode={arg.name === "count" ? "numeric" : undefined}
+                          value={values[arg.name] ?? ""}
+                          onChange={(event) =>
+                            setValues((current) => ({
+                              ...current,
+                              [arg.name]: event.target.value,
+                            }))
+                          }
+                          placeholder={arg.help}
+                        />
+                      )}
+                    </Input.Wrapper>
+                  );
+                })}
+                <Group justify="flex-end" mt="xs">
+                  <Button variant="subtle" onClick={() => setOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="filled" type="submit" disabled={!spec}>
+                    Create
+                  </Button>
+                </Group>
+              </Stack>
+            </form>
+          </Modal.Body>
+        </Modal.Content>
+      </Modal.Root>
     </>
   );
 }

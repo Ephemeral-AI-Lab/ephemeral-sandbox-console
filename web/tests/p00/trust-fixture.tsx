@@ -7,7 +7,7 @@ import "@mantine/notifications/styles.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router";
 import "./trust.css";
-import { ephemeralosTheme } from "../../src/theme";
+import { ephemeralSandboxTheme } from "../../src/theme";
 import { FileView } from "../../src/pages/sandbox/files/FileView";
 import { EventsView } from "../../src/pages/sandbox/observability/EventsView";
 import { CommandCard } from "../../src/pages/sandbox/terminal/CommandCard";
@@ -54,7 +54,7 @@ function App() {
   );
 
   return (
-    <MantineProvider forceColorScheme="light" theme={ephemeralosTheme}>
+    <MantineProvider forceColorScheme="light" theme={ephemeralSandboxTheme}>
       <Notifications limit={4} position="bottom-right" />
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={["/events"]}>

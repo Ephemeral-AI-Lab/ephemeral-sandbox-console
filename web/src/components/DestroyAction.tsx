@@ -5,18 +5,20 @@ import { Trash2 } from "lucide-react";
 import { rpcStream, systemScope } from "@/api/rpc";
 import { ConfirmDestroyDialog } from "@/components/ConfirmDestroyDialog";
 import { useErrorToast } from "@/components/ErrorToast";
-import { Button } from "@mantine/core";
+import { ActionIcon, Button } from "@mantine/core";
 
 /**
  * The destroy_sandbox action: type-the-id confirm, `_stream_logs` progress,
- * then back to the Fleet Board. Shared by SandboxCard and SandboxHeader.
+ * then back to the Dashboard. Shared by SandboxCard and SandboxHeader.
  */
 export function DestroyAction({
   sandboxId,
   label,
+  touchTarget = false,
 }: {
   sandboxId: string;
   label?: string;
+  touchTarget?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -54,6 +56,18 @@ export function DestroyAction({
       busy={busy}
       logLines={logs}
       trigger={(open) => (
+        !label ? (
+          <ActionIcon
+            aria-label={`Destroy ${sandboxId}`}
+            color="danger"
+            onClick={open}
+            size={touchTarget ? 44 : 40}
+            title={`Destroy ${sandboxId}`}
+            variant="subtle"
+          >
+            <Trash2 aria-hidden size={18} />
+          </ActionIcon>
+        ) : (
           <Button
             size="compact-xs"
             color="danger"
@@ -61,9 +75,10 @@ export function DestroyAction({
             aria-label={`Destroy ${sandboxId}`}
             onClick={open}
           >
-            <Trash2 size={12} />
+            <Trash2 aria-hidden size={12} />
             {label}
           </Button>
+        )
       )}
     />
   );

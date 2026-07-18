@@ -6,6 +6,7 @@ const consoleServer = process.env.SANDBOX_CONSOLE_BIND ?? "127.0.0.1:7880";
 
 export default defineConfig({
   plugins: [react()],
+  publicDir: fileURLToPath(new URL("../shared/public", import.meta.url)),
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  publicDir: fileURLToPath(new URL("../../public", import.meta.url)),
+  publicDir: fileURLToPath(new URL("../../../shared/public", import.meta.url)),
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("../../src", import.meta.url)),

@@ -3,6 +3,7 @@
 
 use sandbox_operation_client::GatewayClient;
 
+use crate::auth::DesktopSessionAuth;
 use crate::config::ConsoleConfig;
 use crate::endpoint::EndpointCache;
 
@@ -11,6 +12,7 @@ pub struct AppState {
     pub gateway: GatewayClient,
     pub endpoints: EndpointCache,
     pub config: ConsoleConfig,
+    pub desktop_auth: Option<DesktopSessionAuth>,
 }
 
 impl AppState {
@@ -24,6 +26,13 @@ impl AppState {
             gateway,
             endpoints: EndpointCache::new(config.endpoint_cache_ttl),
             config,
+            desktop_auth: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_desktop_auth(mut self, auth: DesktopSessionAuth) -> Self {
+        self.desktop_auth = Some(auth);
+        self
     }
 }

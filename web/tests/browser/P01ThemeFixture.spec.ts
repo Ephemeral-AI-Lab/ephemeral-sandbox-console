@@ -10,7 +10,9 @@ const STANDARD_VIEWPORTS = [
 
 async function openFixture(page: Page) {
   await page.goto("/p01-theme.html");
-  await expect(page.getByRole("heading", { name: "EphemeralOS operator theme" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Ephemeral Sandbox operator theme" }),
+  ).toBeVisible();
 }
 
 for (const [width, height] of STANDARD_VIEWPORTS) {

@@ -9,4 +9,13 @@ describe("Vite preview proxy", () => {
     expect(source).toContain('"/s/": {');
     expect(source).not.toContain('"/s": {');
   });
+
+  it("serves the repository-owned shared public tree", async () => {
+    const source = await readFile(join(resolve(process.cwd()), "vite.config.ts"), "utf8");
+
+    expect(source).toContain(
+      'publicDir: fileURLToPath(new URL("../shared/public", import.meta.url))',
+    );
+    expect(source).not.toContain('new URL("./public"');
+  });
 });

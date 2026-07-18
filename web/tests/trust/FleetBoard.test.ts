@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SandboxList } from "@/api/types";
 import type { SnapshotResult } from "@/api/observability";
-import { currentFleetList, hasFleetActivity, stabilizeFleetList } from "@/pages/fleet/FleetBoard";
+import { currentFleetList, hasFleetActivity, stabilizeFleetList } from "@/core/fleet";
 
 const slow: SandboxList = {
   sandboxes: [

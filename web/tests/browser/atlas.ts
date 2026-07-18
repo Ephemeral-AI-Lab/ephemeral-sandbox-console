@@ -187,8 +187,16 @@ export async function installAtlasApi(page: Page) {
 export async function waitForAtlasRoute(page: Page, ready: string) {
   await page.getByText(ready, { exact: false }).waitFor();
   await page.waitForFunction(() => {
-    const logo = document.querySelector('img[src="/assets/images/logo.png"]');
-    return logo instanceof HTMLImageElement && logo.complete && logo.naturalWidth > 0;
+    const images = Array.from(document.images);
+    if (!images.every((image) => image.complete && image.naturalWidth > 0)) return false;
+
+    const dashboard = document.querySelector("[data-dashboard-shell]");
+    if (!dashboard) return true;
+
+    const mascot = document.querySelector(
+      'img[src="/brand/ephemeral-sandbox-mascot-b9408770.png"]',
+    );
+    return mascot instanceof HTMLImageElement && mascot.complete && mascot.naturalWidth > 0;
   });
 }
 

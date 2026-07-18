@@ -7,7 +7,7 @@ import { MemoryRouter, Outlet, Route, Routes } from "react-router";
 import type { SnapshotResult } from "../../src/api/observability";
 import type { LedgerEntry } from "../../src/pages/sandbox/terminal/ledger";
 import { TerminalTab } from "../../src/pages/sandbox/terminal/TerminalTab";
-import { ephemeralosTheme } from "../../src/theme";
+import { ephemeralSandboxTheme } from "../../src/theme";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "../../src/index.css";
@@ -141,7 +141,7 @@ function Fixture() {
   const commandSessionId = large ? "large-command" : "running-command";
 
   return (
-    <MantineProvider forceColorScheme="light" theme={ephemeralosTheme}>
+    <MantineProvider forceColorScheme="light" theme={ephemeralSandboxTheme}>
       <Notifications limit={4} position="bottom-right" />
       <QueryClientProvider client={queryClient}>
         <MemoryRouter

@@ -5,11 +5,11 @@ import {
   fetchSandboxSnapshot,
   type SnapshotResult,
 } from "@/api/observability";
-import { FAST_POLL_MS } from "@/poll/usePoll";
 import {
   shouldRequestSandboxSnapshot,
   snapshotHasActivity,
-} from "@/poll/useSandboxSnapshot";
+} from "@/core/activity";
+import { FAST_POLL_MS } from "@/poll/usePoll";
 
 /**
  * Resolve fleet snapshots per sandbox so a revision or active execution in one
@@ -69,9 +69,7 @@ export function useFleetSnapshots(records: SandboxRecord[]) {
 
   const data = useMemo<SnapshotResult>(
     () => ({
-      sandboxes: queries.flatMap(
-        (query) => query.data?.sandboxes ?? [],
-      ),
+      sandboxes: queries.flatMap((query) => query.data?.sandboxes ?? []),
     }),
     [queries],
   );

@@ -4,42 +4,17 @@ import {
   fetchSandboxSnapshot,
   type SnapshotResult,
 } from "@/api/observability";
+import {
+  shouldRequestSandboxSnapshot,
+  snapshotPollingMode,
+} from "@/core/activity";
 import { usePoll } from "@/poll/usePoll";
 
-export function snapshotHasActivity(
-  record: SandboxRecord | null,
-  snapshot?: SnapshotResult | null,
-): boolean {
-  if (record?.state !== "ready") return false;
-  return (snapshot?.sandboxes ?? []).some(
-    (sandbox) =>
-      sandbox.sandbox_id === record.id &&
-      (sandbox.stack.active_leases > 0 ||
-        sandbox.workspaces.some(
-          (workspace) => workspace.active_namespace_executions.length > 0,
-        )),
-  );
-}
-
-export function shouldRequestSandboxSnapshot(
-  record: SandboxRecord | null,
-  snapshot: SnapshotResult | undefined,
-  lastSnapshotRevision: number | null | undefined,
-): boolean {
-  if (record?.state !== "ready") return false;
-  if (snapshot === undefined) {
-    if (lastSnapshotRevision === undefined) return true;
-    return (
-      typeof record.activity_revision === "number" &&
-      record.activity_revision !== lastSnapshotRevision
-    );
-  }
-  if (snapshotHasActivity(record, snapshot)) return true;
-  return (
-    typeof record.activity_revision === "number" &&
-    record.activity_revision !== lastSnapshotRevision
-  );
-}
+export {
+  shouldRequestSandboxSnapshot,
+  snapshotHasActivity,
+  snapshotPollingMode,
+} from "@/core/activity";
 
 /**
  * Daemon snapshot polling is revision-gated. Manager record polling discovers
@@ -62,7 +37,7 @@ export function useSandboxSnapshot(
       const result = await fetchSandboxSnapshot(sandboxId, signal);
       return result;
     },
-    mode: (data) => (snapshotHasActivity(record, data) ? "fast" : "slow"),
+    mode: (data) => snapshotPollingMode(record, data),
     enabled: (data) =>
       sandboxId !== "" &&
       shouldRequestSandboxSnapshot(record, data, lastSnapshotRevision.current),

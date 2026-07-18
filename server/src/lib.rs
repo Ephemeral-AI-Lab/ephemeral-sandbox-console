@@ -1,4 +1,4 @@
-//! Web console HTTP server for the EphemeralOS sandbox.
+//! Web console HTTP server for Ephemeral Sandbox.
 //!
 //! A client peer of the three `sandbox-cli` binaries, built on
 //! `sandbox_operation_client::GatewayClient` and the merged semantic catalog.
@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 pub mod assets;
+pub mod auth;
 pub mod catalog;
 pub mod config;
 pub mod daemon_api;

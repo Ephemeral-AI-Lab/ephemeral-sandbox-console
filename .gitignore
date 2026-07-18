@@ -24,6 +24,7 @@
 /web/blob-report/
 /web/coverage/
 /web/.cache/
+/desktop/src-tauri/gen/
 /test-results/
 /playwright-report/
 /blob-report/

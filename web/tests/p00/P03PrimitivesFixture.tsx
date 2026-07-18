@@ -129,7 +129,7 @@ function PrimitiveGallery() {
           </Text>
           <h1>Console controls and operator states</h1>
           <Text c="dimmed" maw="54rem">
-            Shared Mantine primitives are shown in the compact EphemeralOS console language before page-by-page migration.
+            Shared Mantine primitives are shown in the compact Ephemeral Sandbox console language before page-by-page migration.
           </Text>
         </div>
         <Breadcrumbs separator="/">

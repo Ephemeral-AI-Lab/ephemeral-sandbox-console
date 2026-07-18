@@ -156,6 +156,17 @@ describe("Fleet current usage", () => {
     expect(mocks.fetchCgroup).toHaveBeenCalledTimes(2);
   });
 
+  it("drops cached current usage when a sandbox leaves ready", async () => {
+    const view = render(<Harness records={[record("sandbox-a")]} />, {
+      wrapper: createWrapper(),
+    });
+    await flush();
+    expect(screen.getByText("21000000")).toBeTruthy();
+
+    view.rerender(<Harness records={[record("sandbox-a", "stopping")]} />);
+    expect(screen.getByText("unavailable")).toBeTruthy();
+  });
+
   it("renders current values without CPU or memory history graphics", () => {
     render(
       <SandboxCard
@@ -167,9 +178,10 @@ describe("Fleet current usage", () => {
       { wrapper: createWrapper() },
     );
 
-    expect(screen.getByText("Current usage")).toBeTruthy();
+    expect(screen.getByText("CPU")).toBeTruthy();
+    expect(screen.getByText("MEM")).toBeTruthy();
     expect(screen.getByText("1.0%")).toBeTruthy();
-    expect(screen.getByText("21.0 MB")).toBeTruthy();
+    expect(screen.getByText("20MiB")).toBeTruthy();
     expect(screen.queryByRole("img", { name: "CPU history" })).toBeNull();
     expect(screen.queryByRole("img", { name: "Memory history" })).toBeNull();
   });

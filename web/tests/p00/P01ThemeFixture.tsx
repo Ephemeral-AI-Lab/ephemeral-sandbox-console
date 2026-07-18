@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import { useReducedMotion } from "@mantine/hooks";
 import { createRoot } from "react-dom/client";
-import { ephemeralosTheme } from "@/theme";
+import { ephemeralSandboxTheme } from "@/theme";
 import "@mantine/core/styles.css";
 import styles from "./p01-theme-fixture.module.css";
 
@@ -26,11 +26,11 @@ function ThemeSpecimen() {
           className={styles.logo}
           data-testid="brand-logo"
           height="36"
-          src="/assets/images/logo.png"
+          src="/brand/ephemeral-sandbox-mascot-b9408770.png"
           width="36"
         />
         <div>
-          <Title order={1}>EphemeralOS operator theme</Title>
+          <Title order={1}>Ephemeral Sandbox operator theme</Title>
           <Text c="dimmed" size="sm">
             P01 fixture · light only · compact operational density
           </Text>
@@ -95,7 +95,7 @@ function ThemeSpecimen() {
 
 export function P01ThemeFixture() {
   return (
-    <MantineProvider forceColorScheme="light" theme={ephemeralosTheme}>
+    <MantineProvider forceColorScheme="light" theme={ephemeralSandboxTheme}>
       <ThemeSpecimen />
     </MantineProvider>
   );

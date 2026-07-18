@@ -18,6 +18,7 @@ The repository contains:
 - `web/`: the React and Vite application, unit tests, Playwright coverage, and
   tracked visual snapshots.
 - `bin/`: console-local packaging and launch helpers.
+- `docs/`: console-owned behavior and presentation contracts.
 - `desktop/`: a reserved placeholder; desktop implementation is out of scope.
 
 Core operation dependencies are fetched from one immutable Ephemeral Sandbox
@@ -112,5 +113,9 @@ and starts the console on `127.0.0.1:7880`. Use `--skip-gateway` with
 already-running gateway without a core checkout.
 
 See [`server/README.md`](server/README.md) for the BFF routes and configuration
-precedence, and [`MIGRATION_SPEC.md`](MIGRATION_SPEC.md) for the repository
-boundary and acceptance gates.
+precedence, [`docs/workspace-process-topology.md`](docs/workspace-process-topology.md)
+for the process-topology presentation contract,
+[`docs/polling-contract.md`](docs/polling-contract.md) for browser polling and
+daemon-snapshot scheduling, and
+[`MIGRATION_SPEC.md`](MIGRATION_SPEC.md) for the repository boundary and
+acceptance gates.

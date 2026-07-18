@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Anchor,
   AppShell,
@@ -8,11 +8,18 @@ import {
   Button,
   Drawer,
   Group,
-  Image,
   Stack,
   Text,
+  VisuallyHidden,
 } from "@mantine/core";
 import { Link, Outlet, useLocation } from "react-router";
+import { PRODUCT_NAME } from "@/config/brand";
+import { CreateSandboxModal } from "@/pages/fleet/CreateSandboxModal";
+import {
+  DashboardShellContext,
+  type DashboardConnectionState,
+} from "@/pages/dashboard/DashboardShellContext";
+import styles from "@/shell/Shell.module.css";
 
 const TAB_LABELS: Record<string, string> = {
   terminal: "Terminal",
@@ -27,6 +34,13 @@ const OBSERVABILITY_LABELS: Record<string, string> = {
   traces: "Traces",
   events: "Events",
   layerstack: "Layers",
+};
+
+const CONNECTION_LABELS: Record<DashboardConnectionState, string> = {
+  connecting: "Connecting",
+  connected: "Connected",
+  stale: "Stale data",
+  disconnected: "Disconnected",
 };
 
 type Crumb = { label: string; to?: string };
@@ -46,7 +60,7 @@ function crumbs(pathname: string): Crumb[] {
 
   const sandboxPath = `/sandboxes/${parts[1]}`;
   const result: Crumb[] = [
-    { label: "Fleet", to: "/" },
+    { label: "Dashboard", to: "/" },
     { label: decodePathSegment(parts[1]), to: sandboxPath },
   ];
   const tab = parts[2];
@@ -60,8 +74,12 @@ function crumbs(pathname: string): Crumb[] {
 
 function navigationItems(pathname: string): NavigationItem[] {
   const parts = pathname.split("/").filter(Boolean);
-  const fleet: NavigationItem = { label: "Fleet", to: "/", active: pathname === "/" };
-  if (parts[0] !== "sandboxes" || !parts[1]) return [fleet];
+  const dashboard: NavigationItem = {
+    label: "Dashboard",
+    to: "/",
+    active: pathname === "/",
+  };
+  if (parts[0] !== "sandboxes" || !parts[1]) return [dashboard];
 
   const base = `/sandboxes/${parts[1]}`;
   const item = (label: string, suffix = "", nested = false): NavigationItem => {
@@ -75,7 +93,7 @@ function navigationItems(pathname: string): NavigationItem[] {
   };
 
   return [
-    fleet,
+    dashboard,
     item("Terminal", "terminal"),
     item("Files", "files"),
     item("Observability", "observability"),
@@ -90,10 +108,21 @@ function navigationItems(pathname: string): NavigationItem[] {
 
 export function Shell() {
   const location = useLocation();
+  const isDashboard = location.pathname === "/";
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [createLogs, setCreateLogs] = useState<string[] | null>(null);
+  const [connection, setConnection] =
+    useState<DashboardConnectionState>("connecting");
   const trail = crumbs(location.pathname);
   const items = navigationItems(location.pathname);
-  const activeIndex = Math.max(0, items.reduce((active, item, index) => item.active ? index : active, -1));
+  const activeIndex = Math.max(
+    0,
+    items.reduce((active, item, index) => (item.active ? index : active), -1),
+  );
+  const shellState = useMemo(
+    () => ({ connection, createLogs, setConnection, setCreateLogs }),
+    [connection, createLogs],
+  );
 
   const focusActiveNavigation = () => {
     [...document.querySelectorAll<HTMLElement>("[data-shell-active-navigation]")]
@@ -102,82 +131,140 @@ export function Shell() {
   };
 
   return (
-    <AppShell data-console-shell header={{ height: 44 }} padding={0}>
-      <Anchor href="#main-content" id="skip-link">
-        Skip to main content
-      </Anchor>
-      <AppShell.Header>
-        <Group h="100%" px="md" gap="sm" wrap="nowrap">
-          <Burger
-            aria-label={navigationOpen ? "Close navigation" : "Open navigation"}
-            hiddenFrom="sm"
-            onClick={() => setNavigationOpen((opened) => !opened)}
-            opened={navigationOpen}
-            size="sm"
-          />
-          <Anchor
-            aria-label="EphemeralOS fleet"
-            component={Link}
-            to="/"
-            underline="never"
-          >
-            <Group gap={6} wrap="nowrap">
-              <Image alt="" h={18} src="/assets/images/logo.png" w={18} />
-              <Text c="dark" fw={700} size="sm">
-                EphemeralOS
-              </Text>
-            </Group>
-          </Anchor>
-          {trail.length > 0 ? (
-            <Box data-console-breadcrumbs visibleFrom="sm">
-              <Breadcrumbs separator="›">
-                {trail.map((crumb) =>
-                  crumb.to ? (
-                    <Anchor component={Link} key={`${crumb.label}-${crumb.to}`} size="sm" to={crumb.to}>
-                      {crumb.label}
-                    </Anchor>
-                  ) : (
-                    <Text c="dimmed" key={crumb.label} size="sm">
-                      {crumb.label}
-                    </Text>
-                  ),
-                )}
-              </Breadcrumbs>
-            </Box>
-          ) : null}
-        </Group>
-      </AppShell.Header>
-
-      <Drawer
-        onClose={() => setNavigationOpen(false)}
-        onEnterTransitionEnd={focusActiveNavigation}
-        opened={navigationOpen}
-        position="left"
-        size="xs"
-        title="Navigation"
+    <DashboardShellContext.Provider value={shellState}>
+      <AppShell
+        data-console-shell
+        data-dashboard-shell={isDashboard || undefined}
+        header={{
+          height: isDashboard
+            ? { base: "64px", sm: "80px" }
+            : "44px",
+        }}
+        padding={0}
       >
-        <nav aria-label="Primary navigation">
-          <Stack gap="xs">
-            {items.map((item, index) => (
-              <Button
+        <Anchor href="#main-content" id="skip-link">
+          Skip to main content
+        </Anchor>
+        <AppShell.Header
+          className={`${styles.header} ${isDashboard ? styles.dashboardHeader : styles.detailHeader}`}
+        >
+          <Group className={styles.headerInner} gap="md" justify="space-between" wrap="nowrap">
+            <Group gap="sm" miw={0} wrap="nowrap">
+              {!isDashboard ? (
+                <Burger
+                  aria-label={navigationOpen ? "Close navigation" : "Open navigation"}
+                  hiddenFrom="sm"
+                  onClick={() => setNavigationOpen((opened) => !opened)}
+                  opened={navigationOpen}
+                  size="sm"
+                />
+              ) : null}
+              <Anchor
+                aria-label={`${PRODUCT_NAME} dashboard`}
+                className={styles.brandLink}
                 component={Link}
-                data-shell-active-navigation={index === activeIndex || undefined}
-                justify="flex-start"
-                key={item.to}
-                onClick={() => setNavigationOpen(false)}
-                to={item.to}
-                variant={item.active ? "filled" : "subtle"}
+                to="/"
+                underline="never"
               >
-                {item.label}
-              </Button>
-            ))}
-          </Stack>
-        </nav>
-      </Drawer>
+                <Text className={styles.brandName} fw={700} truncate>
+                  {PRODUCT_NAME}
+                </Text>
+              </Anchor>
+              {isDashboard ? (
+                <Box
+                  aria-label={`Console ${CONNECTION_LABELS[connection]}`}
+                  className={styles.consolePill}
+                  role="status"
+                >
+                  <span
+                    aria-hidden
+                    className={styles.connectionDot}
+                    data-connection={connection}
+                  />
+                  <span>Console</span>
+                  <VisuallyHidden> — {CONNECTION_LABELS[connection]}</VisuallyHidden>
+                </Box>
+              ) : null}
+              {!isDashboard && trail.length > 0 ? (
+                <Box data-console-breadcrumbs visibleFrom="sm">
+                  <Breadcrumbs separator="›">
+                    {trail.map((crumb) =>
+                      crumb.to ? (
+                        <Anchor
+                          component={Link}
+                          key={`${crumb.label}-${crumb.to}`}
+                          size="sm"
+                          to={crumb.to}
+                        >
+                          {crumb.label}
+                        </Anchor>
+                      ) : (
+                        <Text c="dimmed" key={crumb.label} size="sm">
+                          {crumb.label}
+                        </Text>
+                      ),
+                    )}
+                  </Breadcrumbs>
+                </Box>
+              ) : null}
+            </Group>
 
-      <AppShell.Main data-console-main id="main-content" tabIndex={-1}>
-        <Outlet />
-      </AppShell.Main>
-    </AppShell>
+            {isDashboard ? (
+              <>
+                <nav aria-label="Primary navigation" className={styles.dashboardNav}>
+                  <Anchor
+                    aria-current="page"
+                    className={styles.dashboardNavLink}
+                    component={Link}
+                    to="/"
+                    underline="never"
+                    visibleFrom="sm"
+                  >
+                    Dashboard
+                  </Anchor>
+                </nav>
+                <CreateSandboxModal onStream={setCreateLogs} />
+              </>
+            ) : null}
+          </Group>
+        </AppShell.Header>
+
+        <Drawer
+          onClose={() => setNavigationOpen(false)}
+          onEnterTransitionEnd={focusActiveNavigation}
+          opened={navigationOpen}
+          position="left"
+          size="xs"
+          title="Navigation"
+        >
+          <nav aria-label="Primary navigation">
+            <Stack gap="xs">
+              {items.map((item, index) => (
+                <Button
+                  component={Link}
+                  data-shell-active-navigation={index === activeIndex || undefined}
+                  justify="flex-start"
+                  key={item.to}
+                  onClick={() => setNavigationOpen(false)}
+                  to={item.to}
+                  variant={item.active ? "filled" : "subtle"}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </Stack>
+          </nav>
+        </Drawer>
+
+        <AppShell.Main
+          className={isDashboard ? styles.dashboardMain : styles.detailMain}
+          data-console-main
+          id="main-content"
+          tabIndex={-1}
+        >
+          <Outlet />
+        </AppShell.Main>
+      </AppShell>
+    </DashboardShellContext.Provider>
   );
 }

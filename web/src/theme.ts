@@ -60,21 +60,21 @@ const eyeBlue: MantineColorsTuple = [
   "#68889e",
   "#527890",
   "#3e6077",
-  "#2e4b60",
+  "#25485e",
   "#203746",
 ];
 
 const success: MantineColorsTuple = [
-  "#effbf3",
-  "#dcf5e5",
-  "#b9e9cb",
-  "#8bd6a7",
-  "#5fbe83",
-  "#3d9c64",
-  "#267a50",
-  "#1e623f",
-  "#174d32",
-  "#103b26",
+  "#ecfdf5",
+  "#d1fae5",
+  "#a7f3d0",
+  "#6ee7b7",
+  "#34d399",
+  "#10b981",
+  "#059669",
+  "#047857",
+  "#065f46",
+  "#064e3b",
 ];
 
 const warning: MantineColorsTuple = [
@@ -97,13 +97,13 @@ const danger: MantineColorsTuple = [
   "#f99b9b",
   "#e96f6f",
   "#d24d4d",
-  "#b83535",
+  "#ba1a1a",
   "#962a2a",
   "#782121",
   "#5c1818",
 ];
 
-export const ephemeralosTheme = createTheme({
+export const ephemeralSandboxTheme = createTheme({
   primaryColor: "eyeBlue",
   primaryShade: 7,
   colors: {
@@ -118,11 +118,11 @@ export const ephemeralosTheme = createTheme({
     red: danger,
     teal: success,
   },
-  white: "#fffdfb",
+  white: "#fffaf5",
   black: "#271f1c",
   fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
   fontFamilyMonospace:
-    'ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace',
+    '"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace',
   headings: {
     fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
     fontWeight: "650",
@@ -153,7 +153,7 @@ export const ephemeralosTheme = createTheme({
     sm: "0.375rem",
     md: "0.5rem",
     lg: "0.625rem",
-    xl: "0.75rem",
+    xl: "1rem",
   },
   defaultRadius: "sm",
   shadows: {

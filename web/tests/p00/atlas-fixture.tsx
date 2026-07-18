@@ -7,7 +7,7 @@ import "@mantine/notifications/styles.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./atlas.css";
-import { ephemeralosTheme } from "../../src/theme";
+import { ephemeralSandboxTheme } from "../../src/theme";
 import { LegacyLayerStackRedirect } from "../../src/App";
 import { Shell } from "../../src/shell/Shell";
 import { FleetBoard } from "../../src/pages/fleet/FleetBoard";
@@ -37,7 +37,7 @@ function AtlasApp() {
   );
 
   return (
-    <MantineProvider forceColorScheme="light" theme={ephemeralosTheme}>
+    <MantineProvider forceColorScheme="light" theme={ephemeralSandboxTheme}>
       <Notifications limit={4} position="bottom-right" />
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[route]}>

@@ -7,12 +7,50 @@ use http::header::ORIGIN;
 use http::{Method, Request, Response, StatusCode};
 use hyper::body::Incoming;
 
+use crate::auth::DESKTOP_BOOTSTRAP_PATH;
 use crate::response::{self, BoxBody};
 use crate::state::AppState;
 use crate::{assets, catalog, daemon_api, health, proxy, rpc};
 
 pub async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<BoxBody> {
     let path = req.uri().path().to_owned();
+    if let Some(auth) = state.desktop_auth.as_ref() {
+        if !auth.has_expected_host(req.headers()) {
+            return response::no_store(response::text(
+                StatusCode::MISDIRECTED_REQUEST,
+                "request authority does not match the desktop BFF",
+            ));
+        }
+        if path == DESKTOP_BOOTSTRAP_PATH {
+            if req.method() != Method::GET {
+                return response::no_store(response::text(
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    "use GET",
+                ));
+            }
+            return auth.bootstrap_response(req.uri());
+        }
+        if !auth.has_session(req.headers()) {
+            return response::no_store(response::text(
+                StatusCode::UNAUTHORIZED,
+                "desktop session required",
+            ));
+        }
+        if path.starts_with("/api/") && has_opaque_origin(req.headers()) {
+            return response::no_store(response::text(
+                StatusCode::FORBIDDEN,
+                "opaque origins cannot call console APIs",
+            ));
+        }
+        let guarded_route = path.starts_with("/api/") || path.starts_with("/s/");
+        let allowed_preview_origin = path.starts_with("/s/") && has_opaque_origin(req.headers());
+        if guarded_route && !allowed_preview_origin && !auth.has_allowed_origin(req.headers()) {
+            return response::no_store(response::text(
+                StatusCode::FORBIDDEN,
+                "cross-origin requests cannot call desktop BFF routes",
+            ));
+        }
+    }
     // A Preview document has an opaque sandbox origin and therefore sends
     // `Origin: null` for unsafe fetches. It must never invoke Console APIs,
     // even if untrusted script attempts a same-host relative request.
@@ -60,8 +98,9 @@ pub async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Box
 
 fn has_opaque_origin(headers: &http::HeaderMap) -> bool {
     headers
-        .get(ORIGIN)
-        .is_some_and(|origin| origin.as_bytes() == b"null")
+        .get_all(ORIGIN)
+        .iter()
+        .any(|origin| origin.as_bytes() == b"null")
 }
 
 fn health_route(path: &str) -> Option<&str> {
@@ -87,5 +126,8 @@ mod tests {
 
         headers.insert("origin", HeaderValue::from_static("http://127.0.0.1:4173"));
         assert!(!has_opaque_origin(&headers));
+
+        headers.append("origin", HeaderValue::from_static("null"));
+        assert!(has_opaque_origin(&headers));
     }
 }

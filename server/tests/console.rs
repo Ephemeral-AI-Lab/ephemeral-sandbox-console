@@ -4,6 +4,8 @@ mod support;
 
 #[path = "console/assets.rs"]
 mod assets_tests;
+#[path = "console/bootstrap.rs"]
+mod bootstrap_tests;
 #[path = "console/catalog.rs"]
 mod catalog_tests;
 #[path = "console/config.rs"]
@@ -16,3 +18,5 @@ mod health_tests;
 mod proxy_tests;
 #[path = "console/rpc.rs"]
 mod rpc_tests;
+#[path = "console/server.rs"]
+mod server_tests;

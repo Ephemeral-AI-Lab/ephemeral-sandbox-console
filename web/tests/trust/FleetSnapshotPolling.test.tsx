@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,6 +65,11 @@ function Harness({ records }: { records: SandboxRecord[] }) {
   return null;
 }
 
+function ResolutionHarness({ records }: { records: SandboxRecord[] }) {
+  const fleet = useFleetSnapshots(records);
+  return <div>{fleet.data.sandboxes.length}</div>;
+}
+
 function createWrapper() {
   const client = new QueryClient({
     defaultOptions: {
@@ -109,6 +114,21 @@ describe("revision-gated fleet snapshots", () => {
 
     await flush(30_000);
     expect(mocks.fetchSandboxSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves resolved per-sandbox data while another snapshot is pending", async () => {
+    mocks.fetchSandboxSnapshot.mockImplementation(async (sandboxId: string) => {
+      if (sandboxId === "sandbox-b") return new Promise<SnapshotResult>(() => {});
+      return structuredClone(next.get(sandboxId));
+    });
+    const view = render(
+      <ResolutionHarness records={[record("sandbox-a"), record("sandbox-b")]} />,
+      { wrapper: createWrapper() },
+    );
+    await flush();
+
+    expect(screen.getByText("1")).toBeTruthy();
+    view.unmount();
   });
 
   it("contacts only the sandbox whose activity revision changed", async () => {

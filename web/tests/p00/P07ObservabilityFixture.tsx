@@ -9,7 +9,7 @@ import { LayerStackView } from "../../src/pages/sandbox/observability/LayerStack
 import { ResourcesView } from "../../src/pages/sandbox/observability/ResourcesView";
 import { CgroupView } from "../../src/pages/sandbox/observability/CgroupView";
 import { TracesView } from "../../src/pages/sandbox/observability/TracesView";
-import { ephemeralosTheme } from "../../src/theme";
+import { ephemeralSandboxTheme } from "../../src/theme";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "../../src/index.css";
@@ -49,7 +49,7 @@ function Fixture() {
     [],
   );
   return (
-    <MantineProvider forceColorScheme="light" theme={ephemeralosTheme}>
+    <MantineProvider forceColorScheme="light" theme={ephemeralSandboxTheme}>
       <Notifications limit={4} position="bottom-right" />
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[`/${view}`]}>
