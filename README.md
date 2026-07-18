@@ -28,13 +28,14 @@ require a sibling core checkout.
 
 - Rust from `rust-toolchain.toml`
 - Node.js 24, pinned by `.node-version` and `.nvmrc`
-- Docker only when using the local full-stack launcher
+- Docker when using the local full-stack launcher or live compatibility gate
 
 ## Build and test
 
 ```sh
-cargo fmt --check
-cargo clippy --workspace --all-targets
+bin/check-boundaries
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked
 cargo test --workspace --locked
 
 cd web
@@ -43,18 +44,30 @@ npm run test:unit
 npm run build
 npm run test:e2e
 npm run test:a11y
+npm run test:security
 npm run test:visual
 ```
 
-Package the production SPA into `dist/console` and build the BFF with:
+The live compatibility gate clones the immutable core revision into a temporary
+directory and exercises catalog, one-shot and SSE RPC, health, files, and HTTP
+and WebSocket previews against a real Docker sandbox:
+
+```sh
+bin/live-pinned-core-check
+```
+
+Build the BFF and matching production SPA into an installable directory and
+platform-specific archive with:
 
 ```sh
 bin/package-console
-cargo build --locked --release -p sandbox-console --bin sandbox-console
 ```
 
-Both `web/dist` and `dist/console` are generated and intentionally untracked.
-A release should ship the BFF binary and the matching `dist/console` tree.
+The bundle is written to `dist/ephemeral-sandbox-console`, with the BFF under
+`bin/` and assets under `share/ephemeral-sandbox-console/`. The matching
+`.tar.gz` is ready for release upload. `web/dist`, `dist/console`, and all
+release bundles are generated and intentionally untracked. For a local
+assets-only refresh, use `bin/package-console --assets-only`.
 
 ## Run against a gateway
 

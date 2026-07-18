@@ -211,7 +211,7 @@ for (const [width, height] of [
   }
 }
 
-test("P07 Events keeps selection and expanded attrs while polling, pauses on demand, and exposes the last confirmed error", async ({ page }) => {
+test("P07 Events keeps selection and expanded attrs while polling, pauses on demand, and exposes the last confirmed error @visual", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const api = await openView(page, "events");
   const tableRows = page.locator("[data-event-row]");
@@ -265,7 +265,7 @@ test("P12 keeps 10k Events sorting below the input-to-paint budget", async ({ pa
   });
 });
 
-test("P07 virtualizes a 2K-span waterfall and preserves an independent overflow owner", async ({ page }) => {
+test("P07 virtualizes a 2K-span waterfall and preserves an independent overflow owner @visual", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openView(page, "traces");
   const waterfall = page.locator("[data-trace-waterfall]");
@@ -295,7 +295,7 @@ test("P12 keeps 2k Trace waterfall scrolling below the input-to-paint budget", a
   await expect(page.locator(`[data-trace-span="span-${String(lastIndex + 1).padStart(4, "0")}"]`)).toBeVisible();
 });
 
-test("P07 exposes selected span detail without expanding the 2K waterfall", async ({ page }) => {
+test("P07 exposes selected span detail without expanding the 2K waterfall @visual", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openView(page, "traces");
   const root = page.locator('[data-trace-span="span-root"]');
@@ -305,7 +305,7 @@ test("P07 exposes selected span detail without expanding the 2K waterfall", asyn
   await expect(page).toHaveScreenshot("p07-traces-span-detail-1440x900.png", { animations: "disabled" });
 });
 
-test("P07 provides a narrow trace drawer while the waterfall keeps its own horizontal scroll", async ({ page }) => {
+test("P07 provides a narrow trace drawer while the waterfall keeps its own horizontal scroll @visual", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await openView(page, "traces");
   await page.getByRole("button", { name: "Choose trace" }).click();

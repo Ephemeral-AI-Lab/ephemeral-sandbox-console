@@ -7,6 +7,24 @@ web_root=$repo_root/web
 built_assets=$web_root/dist
 dist_root=$repo_root/dist
 packaged_assets=$dist_root/console
+package_name=ephemeral-sandbox-console
+package_dir=$dist_root/$package_name
+assets_only=0
+
+case "${1:-}" in
+    '') ;;
+    --assets-only) assets_only=1 ;;
+    -h|--help)
+        printf 'package-console [--assets-only]\n\n'
+        printf 'Without flags, build a release bundle containing the BFF and matching SPA.\n'
+        printf '%s\n' '--assets-only updates dist/console for local development.'
+        exit 0
+        ;;
+    *)
+        printf 'unknown option: %s\n' "$1" >&2
+        exit 2
+        ;;
+esac
 
 for command_name in node npm; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -14,6 +32,15 @@ for command_name in node npm; do
         exit 1
     fi
 done
+
+if [ "$assets_only" -eq 0 ]; then
+    for command_name in cargo rustc tar; do
+        if ! command -v "$command_name" >/dev/null 2>&1; then
+            printf '%s is required to package the console release\n' "$command_name" >&2
+            exit 1
+        fi
+    done
+fi
 
 node_major=$(node -p 'process.versions.node.split(".")[0]')
 if [ "$node_major" != 24 ]; then
@@ -28,15 +55,49 @@ if [ ! -f "$built_assets/index.html" ]; then
     exit 1
 fi
 
+if [ "$assets_only" -eq 0 ]; then
+    (cd "$repo_root" && cargo build --locked --release -p sandbox-console --bin sandbox-console)
+    target_dir=${CARGO_TARGET_DIR:-$repo_root/target}
+    case "$target_dir" in
+        /*) ;;
+        *) target_dir=$repo_root/$target_dir ;;
+    esac
+    release_bin=$target_dir/release/sandbox-console
+    if [ ! -x "$release_bin" ]; then
+        printf 'release build produced no executable at %s\n' "$release_bin" >&2
+        exit 1
+    fi
+    host_target=$(rustc -vV | sed -n 's/^host: //p')
+    case "$host_target" in
+        ''|*[!A-Za-z0-9._-]*)
+            printf 'could not determine a safe Rust host target\n' >&2
+            exit 1
+            ;;
+    esac
+    package_archive=$dist_root/$package_name-$host_target.tar.gz
+fi
+
 mkdir -p "$dist_root"
 stage_root=$(mktemp -d "$dist_root/.console-package.XXXXXX")
 new_assets=$stage_root/new
 previous_assets=$stage_root/previous
+new_package=$stage_root/$package_name
+previous_package=$stage_root/previous-package
+new_archive=$stage_root/$package_name.tar.gz
+previous_archive=$stage_root/previous-package.tar.gz
 
 cleanup() {
     status=$?
     if [ ! -e "$packaged_assets" ] && [ -e "$previous_assets" ]; then
         mv "$previous_assets" "$packaged_assets" 2>/dev/null || true
+    fi
+    if [ "$assets_only" -eq 0 ]; then
+        if [ ! -e "$package_dir" ] && [ -e "$previous_package" ]; then
+            mv "$previous_package" "$package_dir" 2>/dev/null || true
+        fi
+        if [ ! -e "$package_archive" ] && [ -e "$previous_archive" ]; then
+            mv "$previous_archive" "$package_archive" 2>/dev/null || true
+        fi
     fi
     rm -rf "$stage_root"
     trap - 0 1 2 3 15
@@ -47,6 +108,16 @@ trap cleanup 0 1 2 3 15
 mkdir "$new_assets"
 cp -R "$built_assets"/. "$new_assets"/
 
+if [ "$assets_only" -eq 0 ]; then
+    mkdir -p "$new_package/bin" "$new_package/share/ephemeral-sandbox-console"
+    cp "$release_bin" "$new_package/bin/sandbox-console"
+    cp "$repo_root/bin/start-sandbox-console" "$new_package/bin/start-sandbox-console"
+    cp "$repo_root/LICENSE" "$repo_root/README.md" "$new_package/"
+    cp -R "$built_assets"/. "$new_package/share/ephemeral-sandbox-console"/
+    chmod 755 "$new_package/bin/sandbox-console" "$new_package/bin/start-sandbox-console"
+    tar -czf "$new_archive" -C "$stage_root" "$package_name"
+fi
+
 if [ -e "$packaged_assets" ]; then
     mv "$packaged_assets" "$previous_assets"
 fi
@@ -54,3 +125,15 @@ mv "$new_assets" "$packaged_assets"
 
 printf 'packaged console SPA into %s\n' "$packaged_assets"
 
+if [ "$assets_only" -eq 0 ]; then
+    if [ -e "$package_dir" ]; then
+        mv "$package_dir" "$previous_package"
+    fi
+    if [ -e "$package_archive" ]; then
+        mv "$package_archive" "$previous_archive"
+    fi
+    mv "$new_package" "$package_dir"
+    mv "$new_archive" "$package_archive"
+    printf 'packaged console release into %s\n' "$package_dir"
+    printf 'created release archive %s\n' "$package_archive"
+fi

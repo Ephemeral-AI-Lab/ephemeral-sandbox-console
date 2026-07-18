@@ -291,7 +291,7 @@ PY
 )
 
 say "checking catalog, RPC, SSE, health, files, and preview tunnels"
-CONSOLE_BASE_URL="http://$CONSOLE_ADDR" \
+env CONSOLE_BASE_URL="http://$CONSOLE_ADDR" \
     SANDBOX_ID="$SANDBOX_ID" \
     GATEWAY_AUTH_TOKEN="$GATEWAY_AUTH_TOKEN" \
     PREVIEW_PORT="$PREVIEW_PORT" \

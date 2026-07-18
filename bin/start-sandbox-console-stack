@@ -123,7 +123,7 @@ else
     fi
     if [ "$needs_spa" -eq 1 ]; then
         printf '==> building SPA assets\n'
-        "$repo_root/bin/package-console"
+        "$repo_root/bin/package-console" --assets-only
     else
         printf '==> SPA assets are up to date (dist/console)\n'
     fi

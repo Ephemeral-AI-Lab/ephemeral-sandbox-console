@@ -57,7 +57,7 @@ test("P04 keeps the cgroup URL while labeling the view Processes", async ({ page
   await expect(page.locator("[data-console-breadcrumbs]")).toContainText("Processes");
 });
 
-test("P04 supports skip focus, scoped tabs, and bounded route scrolling", async ({ page }) => {
+test("P04 supports skip focus, scoped tabs, and bounded route scrolling @visual", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await openAtlas(page, `/sandboxes/${SANDBOX_ID}/observability/layerstack`);
   await waitForAtlasRoute(page, "fixture-layer-2");
@@ -90,7 +90,7 @@ test("P04 supports skip focus, scoped tabs, and bounded route scrolling", async 
   expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0);
 });
 
-test("P04 narrow Drawer traps and restores focus", async ({ page }) => {
+test("P04 narrow Drawer traps and restores focus @visual", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await openAtlas(page, `/sandboxes/${SANDBOX_ID}/observability/resources`);
   await waitForAtlasRoute(page, "CPU (Δ cpu_usec / s)");

@@ -27,11 +27,11 @@ jobs:
       - name: Check repository boundaries
         run: bin/check-boundaries
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --all --check
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets --locked
       - name: Run Rust tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   web:
     name: Web unit and production build
@@ -52,6 +52,30 @@ jobs:
         run: npm run test:unit
       - name: Build production assets
         run: npm run build
+
+  package:
+    name: Release package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the BFF and matching web bundle
+        run: bin/package-console
+      - name: Validate the installed layout
+        run: |
+          test -x dist/ephemeral-sandbox-console/bin/sandbox-console
+          test -x dist/ephemeral-sandbox-console/bin/start-sandbox-console
+          test -f dist/ephemeral-sandbox-console/share/ephemeral-sandbox-console/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ephemeral-sandbox-console-linux
+          path: dist/ephemeral-sandbox-console-*.tar.gz
+          if-no-files-found: error
 
   browser:
     name: Browser, accessibility, and security

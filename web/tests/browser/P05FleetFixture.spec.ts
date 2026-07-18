@@ -277,7 +277,7 @@ test("P05 empty and initial-error Fleet states remain explicit @visual", async (
   await errorPage.close();
 });
 
-test("P05 WorkspacePicker searches virtually, preserves the create draft, and restores focus", async ({ page }) => {
+test("P05 WorkspacePicker searches virtually, preserves the create draft, and restores focus @visual", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await openFleet(page, { list: [record("picker-sandbox")] });
   await expect(page.locator("[data-fleet-card]")).toHaveCount(1);

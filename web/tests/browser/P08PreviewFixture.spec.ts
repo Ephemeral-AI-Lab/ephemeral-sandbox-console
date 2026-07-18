@@ -5,14 +5,18 @@ const previewRoute = `/sandboxes/${SANDBOX_ID}/preview?port=5173`;
 const previewPrefix = `/s/${SANDBOX_ID}/shared/5173`;
 const iframeTitle = `preview of ${SANDBOX_ID} port 5173`;
 
-async function openPreview(page: Page, body: string, status = 200) {
-  await page.route(`**${previewPrefix}/**`, (route) => route.fulfill({ status, contentType: "text/html", body }));
-  await installAtlasApi(page);
-  await page.goto(`/atlas.html?route=${encodeURIComponent(previewRoute)}`);
+async function waitForLogo(page: Page) {
   await page.waitForFunction(() => {
     const logo = document.querySelector('img[src="/assets/images/logo.png"]');
     return logo instanceof HTMLImageElement && logo.complete && logo.naturalWidth > 0;
   });
+}
+
+async function openPreview(page: Page, body: string, status = 200) {
+  await page.route(`**${previewPrefix}/**`, (route) => route.fulfill({ status, contentType: "text/html", body }));
+  await installAtlasApi(page);
+  await page.goto(`/atlas.html?route=${encodeURIComponent(previewRoute)}`);
+  await waitForLogo(page);
   return page.frameLocator(`iframe[title="${iframeTitle}"]`);
 }
 
@@ -39,6 +43,7 @@ test("P08 Preview exposes its opaque loading state @visual", async ({ page }) =>
   await installAtlasApi(page);
   const navigation = page.goto(`/atlas.html?route=${encodeURIComponent(previewRoute)}`);
   await expect(page.getByRole("status")).toHaveText("Loading preview…");
+  await waitForLogo(page);
   await expect(page).toHaveScreenshot("p08-preview-loading-1440x900.png", { animations: "disabled" });
   release?.();
   await navigation;
