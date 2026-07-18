@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust and boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Check repository boundaries
+        run: bin/check-boundaries
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets
+      - name: Run Rust tests
+        run: cargo test --workspace
+
+  web:
+    name: Web unit and production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install clean dependency tree
+        run: npm ci
+      - name: Run unit tests
+        run: npm run test:unit
+      - name: Build production assets
+        run: npm run build
+
+  browser:
+    name: Browser, accessibility, and security
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install clean dependency tree
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run browser tests
+        run: npm run test:e2e -- --grep-invert "@visual|@a11y|@security"
+      - name: Run accessibility tests
+        run: npm run test:a11y
+      - name: Run security tests
+        run: npm run test:security
+
+  visual:
+    name: Visual regression
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install clean dependency tree
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install chromium
+      - name: Run visual tests against the committed Darwin baselines
+        run: npm run test:visual
+
+  live-pinned-core:
+    name: Live pinned-core smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Exercise the console against the immutable core revision
+        run: bin/live-pinned-core-check

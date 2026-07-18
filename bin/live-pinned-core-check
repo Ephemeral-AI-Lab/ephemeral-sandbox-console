@@ -1,0 +1,611 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This is intentionally a black-box check. The console builds from its Git
+# dependencies, while the live gateway comes from a separate temporary clone
+# of the immutable core revision below. A local checkout may seed Git objects,
+# but it is never built in place or modified.
+readonly CORE_GIT_URL="https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git"
+readonly CORE_REV="25363d06d679edcde26839f5483ee7ca18e5c980"
+readonly SANDBOX_IMAGE="${EPHEMERAL_SANDBOX_LIVE_IMAGE:-python:3.13-bookworm}"
+readonly PREVIEW_PORT="${EPHEMERAL_SANDBOX_LIVE_PREVIEW_PORT:-8123}"
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+CONSOLE_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+WORK_ROOT=""
+CORE_ROOT=""
+CORE_TARGET_DIR=""
+CONSOLE_TARGET_DIR=""
+GATEWAY_PID_FILE=""
+GATEWAY_LOG=""
+CONSOLE_LOG=""
+READY_LOG=""
+CREATE_RESPONSE=""
+DESTROY_LOG=""
+GATEWAY_PID=""
+CONSOLE_PID=""
+SANDBOX_ID=""
+GATEWAY_ADDR=""
+GATEWAY_AUTH_TOKEN=""
+MANAGER_CLI=""
+
+say() {
+    printf '%s\n' "$*"
+}
+
+die() {
+    printf 'live-pinned-core-check: %s\n' "$*" >&2
+    exit 1
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+cleanup() {
+    status=$?
+    set +e
+
+    if [ -z "$SANDBOX_ID" ] && [ -s "$CREATE_RESPONSE" ]; then
+        SANDBOX_ID=$(python3 - "$CREATE_RESPONSE" <<'PY' 2>/dev/null
+import json
+import sys
+
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+identifier = value.get("id") if isinstance(value, dict) else None
+if isinstance(identifier, str) and identifier:
+    print(identifier)
+PY
+        )
+    fi
+
+    if [ -n "$SANDBOX_ID" ] && [ -x "$MANAGER_CLI" ]; then
+        SANDBOX_GATEWAY_SOCKET="$GATEWAY_ADDR" \
+            SANDBOX_GATEWAY_AUTH_TOKEN="$GATEWAY_AUTH_TOKEN" \
+            "$MANAGER_CLI" destroy_sandbox --sandbox-id "$SANDBOX_ID" \
+            >"$DESTROY_LOG" 2>&1 || true
+    fi
+
+    if [[ "$CONSOLE_PID" =~ ^[0-9]+$ ]]; then
+        kill "$CONSOLE_PID" 2>/dev/null || true
+        wait "$CONSOLE_PID" 2>/dev/null || true
+    fi
+    if [[ "$GATEWAY_PID" =~ ^[0-9]+$ ]]; then
+        kill "$GATEWAY_PID" 2>/dev/null || true
+        for _ in {1..50}; do
+            kill -0 "$GATEWAY_PID" 2>/dev/null || break
+            sleep 0.1
+        done
+        kill -KILL "$GATEWAY_PID" 2>/dev/null || true
+    fi
+
+    if [ "$status" -ne 0 ]; then
+        printf 'live pinned-core smoke failed (exit %s)\n' "$status" >&2
+        for log in "$READY_LOG" "$CONSOLE_LOG" "$GATEWAY_LOG" "$DESTROY_LOG"; do
+            if [ -s "$log" ]; then
+                printf '\n==> %s <==\n' "${log##*/}" >&2
+                tail -n 120 "$log" >&2
+            fi
+        done
+    fi
+
+    if [ -n "$WORK_ROOT" ] && [ -f "$WORK_ROOT/.live-pinned-core-check" ]; then
+        rm -rf -- "$WORK_ROOT"
+    fi
+    return "$status"
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+for command_name in cargo curl docker git python3 rustc; do
+    require_command "$command_name"
+done
+
+case "$PREVIEW_PORT" in
+    ''|*[!0-9]*) die "EPHEMERAL_SANDBOX_LIVE_PREVIEW_PORT must be an integer" ;;
+esac
+if [ "$PREVIEW_PORT" -lt 1 ] || [ "$PREVIEW_PORT" -gt 65535 ]; then
+    die "EPHEMERAL_SANDBOX_LIVE_PREVIEW_PORT must be in 1..65535"
+fi
+
+WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ephemeral-console-live.XXXXXX")"
+touch "$WORK_ROOT/.live-pinned-core-check"
+CORE_ROOT="$WORK_ROOT/core"
+CORE_TARGET_DIR="$WORK_ROOT/core-target"
+CONSOLE_TARGET_DIR="$WORK_ROOT/console-target"
+GATEWAY_PID_FILE="$WORK_ROOT/gateway.pid"
+GATEWAY_LOG="$WORK_ROOT/gateway.log"
+CONSOLE_LOG="$WORK_ROOT/console.log"
+READY_LOG="$WORK_ROOT/gateway-readiness.log"
+CREATE_RESPONSE="$WORK_ROOT/create.json"
+DESTROY_LOG="$WORK_ROOT/destroy.log"
+
+clone_args=(
+    clone
+    --filter=blob:none
+    --depth=1
+    --single-branch
+    --no-checkout
+)
+if [ -n "${EPHEMERAL_SANDBOX_ROOT:-}" ]; then
+    git -C "$EPHEMERAL_SANDBOX_ROOT" rev-parse --git-dir >/dev/null 2>&1 \
+        || die "EPHEMERAL_SANDBOX_ROOT is not a Git checkout: $EPHEMERAL_SANDBOX_ROOT"
+    clone_args+=(--reference-if-able "$EPHEMERAL_SANDBOX_ROOT" --dissociate)
+fi
+
+say "cloning immutable core revision $CORE_REV"
+git "${clone_args[@]}" "$CORE_GIT_URL" "$CORE_ROOT"
+git -C "$CORE_ROOT" fetch --filter=blob:none --depth=1 origin "$CORE_REV"
+git -C "$CORE_ROOT" checkout --detach "$CORE_REV"
+
+actual_core_rev=$(git -C "$CORE_ROOT" rev-parse HEAD)
+[ "$actual_core_rev" = "$CORE_REV" ] \
+    || die "core checkout resolved to $actual_core_rev, expected $CORE_REV"
+actual_core_url=$(git -C "$CORE_ROOT" remote get-url origin)
+[ "$actual_core_url" = "$CORE_GIT_URL" ] \
+    || die "core origin is $actual_core_url, expected $CORE_GIT_URL"
+
+say "building console from canonical pinned Git dependencies"
+CARGO_TARGET_DIR="$CONSOLE_TARGET_DIR" \
+    cargo build --locked --manifest-path "$CONSOLE_ROOT/Cargo.toml" \
+    -p sandbox-console --bin sandbox-console
+CONSOLE_BIN="$CONSOLE_TARGET_DIR/debug/sandbox-console"
+[ -x "$CONSOLE_BIN" ] || die "console binary was not produced"
+
+say "preparing the pinned core cross-build toolchain"
+"$CORE_ROOT/bin/setup-musl-cross"
+
+docker_arch=$(docker info --format '{{.Architecture}}')
+case "$docker_arch" in
+    x86_64|amd64) daemon_artifact="sandbox-daemon-linux-amd64" ;;
+    arm64|aarch64) daemon_artifact="sandbox-daemon-linux-arm64" ;;
+    *) die "unsupported Docker daemon architecture: $docker_arch" ;;
+esac
+
+GATEWAY_CONFIG="$WORK_ROOT/gateway.yml"
+sed "s#^\([[:space:]]*daemon_binary_path:[[:space:]]*\).*\$#\1dist/$daemon_artifact#" \
+    "$CORE_ROOT/config/prd.yml" >"$GATEWAY_CONFIG"
+grep -Fq "daemon_binary_path: dist/$daemon_artifact" "$GATEWAY_CONFIG" \
+    || die "failed to select the $docker_arch daemon artifact"
+
+say "pulling and probing sandbox image $SANDBOX_IMAGE"
+docker pull "$SANDBOX_IMAGE"
+docker run --rm "$SANDBOX_IMAGE" sh -ceu 'command -v git >/dev/null 2>&1' \
+    || die "$SANDBOX_IMAGE must provide git for this self-contained smoke test"
+
+# The core launcher validates both fallback archives before startup. The image
+# probe above guarantees this run never asks the provider to consume them.
+GIT_TOOLCHAIN_DIR="$WORK_ROOT/git-toolchain"
+mkdir -p "$GIT_TOOLCHAIN_DIR"
+printf 'unused: live image supplies git\n' >"$GIT_TOOLCHAIN_DIR/linux-amd64.tar"
+printf 'unused: live image supplies git\n' >"$GIT_TOOLCHAIN_DIR/linux-arm64.tar"
+
+read -r gateway_port console_port < <(python3 - <<'PY'
+import socket
+
+sockets = []
+ports = []
+for _ in range(2):
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    sockets.append(sock)
+    ports.append(sock.getsockname()[1])
+print(*ports)
+PY
+)
+GATEWAY_ADDR="127.0.0.1:$gateway_port"
+CONSOLE_ADDR="127.0.0.1:$console_port"
+GATEWAY_AUTH_TOKEN=$(python3 - <<'PY'
+import secrets
+
+print(secrets.token_hex(32))
+PY
+)
+TOKEN_FILE="$WORK_ROOT/gateway.token"
+umask 077
+printf '%s\n' "$GATEWAY_AUTH_TOKEN" >"$TOKEN_FILE"
+chmod 600 "$TOKEN_FILE"
+
+say "building and starting pinned core gateway at $GATEWAY_ADDR"
+(
+    cd "$CORE_ROOT"
+    CARGO_TARGET_DIR="$CORE_TARGET_DIR" \
+        SANDBOX_GATEWAY_AUTH_TOKEN="$GATEWAY_AUTH_TOKEN" \
+        SANDBOX_GATEWAY_TOKEN_FILE="$TOKEN_FILE" \
+        SANDBOX_GATEWAY_CONFIG_YAML="$GATEWAY_CONFIG" \
+        SANDBOX_GATEWAY_LOG="$GATEWAY_LOG" \
+        SANDBOX_GIT_TOOLCHAIN_DIR="$GIT_TOOLCHAIN_DIR" \
+        bin/start-sandbox-docker-gateway \
+        --rebuild-binary \
+        --gateway-socket "$GATEWAY_ADDR" \
+        --pid-file "$GATEWAY_PID_FILE"
+)
+
+for _ in {1..50}; do
+    if [ -s "$GATEWAY_PID_FILE" ]; then
+        GATEWAY_PID=$(sed -n '1p' "$GATEWAY_PID_FILE")
+        break
+    fi
+    sleep 0.1
+done
+[[ "$GATEWAY_PID" =~ ^[0-9]+$ ]] || die "gateway did not write a valid pid file"
+
+MANAGER_CLI="$CORE_TARGET_DIR/debug/sandbox-manager-cli"
+[ -x "$MANAGER_CLI" ] || die "manager CLI was not produced"
+gateway_ready=0
+for _ in {1..90}; do
+    if SANDBOX_GATEWAY_SOCKET="$GATEWAY_ADDR" \
+        SANDBOX_GATEWAY_AUTH_TOKEN="$GATEWAY_AUTH_TOKEN" \
+        "$MANAGER_CLI" list_sandboxes >/dev/null 2>"$READY_LOG"; then
+        gateway_ready=1
+        break
+    fi
+    kill -0 "$GATEWAY_PID" 2>/dev/null || break
+    sleep 1
+done
+[ "$gateway_ready" -eq 1 ] || die "gateway did not become ready"
+
+say "starting extracted console at $CONSOLE_ADDR"
+SANDBOX_GATEWAY_SOCKET="$GATEWAY_ADDR" \
+    SANDBOX_GATEWAY_AUTH_TOKEN="$GATEWAY_AUTH_TOKEN" \
+    "$CONSOLE_BIN" --bind "$CONSOLE_ADDR" >"$CONSOLE_LOG" 2>&1 &
+CONSOLE_PID=$!
+
+console_ready=0
+for _ in {1..60}; do
+    if curl -fsS "http://$CONSOLE_ADDR/api/catalog" >/dev/null 2>&1; then
+        console_ready=1
+        break
+    fi
+    kill -0 "$CONSOLE_PID" 2>/dev/null || break
+    sleep 0.5
+done
+[ "$console_ready" -eq 1 ] || die "console did not become ready"
+
+FIXTURE_ROOT="$WORK_ROOT/workspace"
+mkdir -p "$FIXTURE_ROOT"
+printf 'live pinned-core fixture\n' >"$FIXTURE_ROOT/README.txt"
+
+say "creating live sandbox"
+SANDBOX_GATEWAY_SOCKET="$GATEWAY_ADDR" \
+    SANDBOX_GATEWAY_AUTH_TOKEN="$GATEWAY_AUTH_TOKEN" \
+    "$MANAGER_CLI" create_sandbox \
+    --image "$SANDBOX_IMAGE" \
+    --workspace-bind-root "$FIXTURE_ROOT" >"$CREATE_RESPONSE"
+SANDBOX_ID=$(python3 - "$CREATE_RESPONSE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    value = json.load(stream)
+identifier = value.get("id") if isinstance(value, dict) else None
+if not isinstance(identifier, str) or not identifier:
+    raise SystemExit("create_sandbox response has no id")
+print(identifier)
+PY
+)
+
+say "checking catalog, RPC, SSE, health, files, and preview tunnels"
+CONSOLE_BASE_URL="http://$CONSOLE_ADDR" \
+    SANDBOX_ID="$SANDBOX_ID" \
+    GATEWAY_AUTH_TOKEN="$GATEWAY_AUTH_TOKEN" \
+    PREVIEW_PORT="$PREVIEW_PORT" \
+    CORE_REV="$CORE_REV" \
+    python3 - <<'PY'
+import base64
+import hashlib
+import json
+import os
+import socket
+import struct
+import textwrap
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+BASE_URL = os.environ["CONSOLE_BASE_URL"]
+SANDBOX_ID = os.environ["SANDBOX_ID"]
+TOKEN = os.environ["GATEWAY_AUTH_TOKEN"].encode()
+PREVIEW_PORT = int(os.environ["PREVIEW_PORT"])
+CORE_REV = os.environ["CORE_REV"]
+
+
+def assert_secret_absent(label, *chunks):
+    if any(TOKEN in chunk for chunk in chunks):
+        raise AssertionError(f"gateway credential leaked through {label}")
+
+
+def request(method, path, payload=None, extra_headers=None, timeout=30):
+    data = None if payload is None else json.dumps(payload).encode()
+    headers = dict(extra_headers or {})
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(
+        BASE_URL + path,
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            body = response.read()
+            response_headers = {
+                name.lower(): value for name, value in response.headers.items()
+            }
+            status = response.status
+    except urllib.error.HTTPError as error:
+        body = error.read()
+        assert_secret_absent(path, body)
+        raise RuntimeError(f"{method} {path} returned HTTP {error.code}") from None
+    header_bytes = json.dumps(response_headers, sort_keys=True).encode()
+    assert_secret_absent(path, header_bytes, body)
+    if status != 200:
+        raise AssertionError(f"{method} {path} returned HTTP {status}")
+    return response_headers, body
+
+
+def json_request(method, path, payload=None, extra_headers=None, timeout=30):
+    headers, body = request(method, path, payload, extra_headers, timeout)
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise AssertionError(f"{path} returned invalid JSON: {error}") from None
+    return headers, value
+
+
+catalog_headers, catalog = json_request("GET", "/api/catalog")
+if set(catalog) != {"management", "runtime", "observability"}:
+    raise AssertionError(f"unexpected catalog domains: {sorted(catalog)}")
+required = {
+    "management": {"list_sandboxes", "inspect_sandbox"},
+    "runtime": {"exec_command", "file_write"},
+    "observability": {"snapshot"},
+}
+for domain, required_operations in required.items():
+    operations = {
+        operation.get("name")
+        for operation in catalog[domain].get("operations", [])
+        if isinstance(operation, dict)
+    }
+    missing = required_operations - operations
+    if missing:
+        raise AssertionError(f"{domain} catalog is missing {sorted(missing)}")
+print("ok: catalog")
+
+preview_source = textwrap.dedent(
+    r"""
+    import base64
+    import hashlib
+    import os
+    import struct
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    PORT = int(os.environ["LIVE_PREVIEW_PORT"])
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, _format, *_args):
+            pass
+
+        def do_GET(self):
+            if self.headers.get("Upgrade", "").lower() == "websocket":
+                self.websocket()
+                return
+            body = b"live-http-preview"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def websocket(self):
+            key = self.headers.get("Sec-WebSocket-Key")
+            if not key:
+                self.send_error(400)
+                return
+            digest = hashlib.sha1(
+                (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
+            ).digest()
+            accept = base64.b64encode(digest).decode()
+            self.send_response(101, "Switching Protocols")
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", accept)
+            self.end_headers()
+            self.wfile.flush()
+
+            first = self.rfile.read(2)
+            if len(first) != 2:
+                return
+            length = first[1] & 0x7F
+            if length == 126:
+                length = struct.unpack("!H", self.rfile.read(2))[0]
+            elif length == 127:
+                length = struct.unpack("!Q", self.rfile.read(8))[0]
+            mask = self.rfile.read(4) if first[1] & 0x80 else b""
+            payload = self.rfile.read(length)
+            if mask:
+                payload = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
+            header = bytes((0x81, len(payload))) if len(payload) < 126 else b"\x81\x7e" + struct.pack("!H", len(payload))
+            self.wfile.write(header + payload)
+            self.wfile.flush()
+            self.close_connection = True
+
+    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    """
+).lstrip()
+
+scope = {"kind": "sandbox", "sandbox_id": SANDBOX_ID}
+_, write_result = json_request(
+    "POST",
+    "/api/rpc",
+    {
+        "op": "file_write",
+        "scope": scope,
+        "args": {"path": "live-preview.py", "content": preview_source},
+    },
+    timeout=120,
+)
+if isinstance(write_result, dict) and "error" in write_result:
+    raise AssertionError("one-shot file_write returned an operation error")
+print("ok: one-shot RPC")
+
+sse_headers, sse_body = request(
+    "POST",
+    "/api/rpc",
+    {"op": "list_sandboxes", "scope": {"kind": "system"}, "args": {}},
+    {"Accept": "text/event-stream"},
+    timeout=120,
+)
+if not sse_headers.get("content-type", "").startswith("text/event-stream"):
+    raise AssertionError("SSE RPC did not return text/event-stream")
+result_events = []
+for block in sse_body.decode().split("\n\n"):
+    lines = block.splitlines()
+    event = next((line[7:] for line in lines if line.startswith("event: ")), None)
+    data = next((line[6:] for line in lines if line.startswith("data: ")), None)
+    if event == "result" and data is not None:
+        result_events.append(json.loads(data))
+if len(result_events) != 1:
+    raise AssertionError(f"SSE RPC returned {len(result_events)} result events")
+sandboxes = result_events[0].get("sandboxes", [])
+if not any(record.get("id") == SANDBOX_ID for record in sandboxes if isinstance(record, dict)):
+    raise AssertionError("SSE list_sandboxes result omitted the live sandbox")
+print("ok: SSE RPC")
+
+escaped_id = urllib.parse.quote(SANDBOX_ID, safe="")
+_, health = json_request("GET", f"/api/sandboxes/{escaped_id}/health")
+if health.get("status") != "ok":
+    raise AssertionError(f"unexpected health response: {health!r}")
+print("ok: health")
+
+_, listing = json_request(
+    "POST", f"/api/sandboxes/{escaped_id}/files/list", {"path": ""}
+)
+entries = listing.get("entries", [])
+if not any(entry.get("name") == "live-preview.py" for entry in entries if isinstance(entry, dict)):
+    raise AssertionError("files/list omitted live-preview.py")
+print("ok: files")
+
+_, exec_result = json_request(
+    "POST",
+    "/api/rpc",
+    {
+        "op": "exec_command",
+        "scope": scope,
+        "args": {
+            "cmd": f"LIVE_PREVIEW_PORT={PREVIEW_PORT} python3 live-preview.py",
+            "yield_time_ms": 0,
+        },
+    },
+    timeout=120,
+)
+if isinstance(exec_result, dict) and "error" in exec_result:
+    raise AssertionError("exec_command failed to start the preview server")
+
+preview_path = f"/s/{escaped_id}/shared/{PREVIEW_PORT}/"
+last_preview_error = None
+for _ in range(60):
+    try:
+        preview_headers, preview_body = request("GET", preview_path, timeout=5)
+        if preview_body == b"live-http-preview":
+            break
+        last_preview_error = "unexpected preview body"
+    except (OSError, RuntimeError, urllib.error.URLError) as error:
+        last_preview_error = str(error)
+    time.sleep(0.5)
+else:
+    raise AssertionError(f"HTTP preview did not become ready: {last_preview_error}")
+
+expected_csp = "sandbox allow-scripts; frame-ancestors 'self'"
+if preview_headers.get("content-security-policy") != expected_csp:
+    raise AssertionError("HTTP preview omitted the opaque-origin CSP")
+if preview_headers.get("service-worker-allowed") is not None:
+    raise AssertionError("HTTP preview exposed Service-Worker-Allowed")
+print("ok: HTTP preview")
+
+
+def receive_exact(stream, length):
+    chunks = []
+    remaining = length
+    while remaining:
+        chunk = stream.recv(remaining)
+        if not chunk:
+            raise AssertionError("WebSocket tunnel closed early")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+host, port_text = BASE_URL.removeprefix("http://").rsplit(":", 1)
+websocket_key = base64.b64encode(os.urandom(16)).decode()
+websocket_path = f"/s/{escaped_id}/shared/{PREVIEW_PORT}/ws"
+with socket.create_connection((host, int(port_text)), timeout=15) as stream:
+    stream.settimeout(15)
+    handshake = (
+        f"GET {websocket_path} HTTP/1.1\r\n"
+        f"Host: {host}:{port_text}\r\n"
+        "Connection: Upgrade\r\n"
+        "Upgrade: websocket\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        f"Sec-WebSocket-Key: {websocket_key}\r\n\r\n"
+    ).encode()
+    stream.sendall(handshake)
+    response_header = bytearray()
+    while not response_header.endswith(b"\r\n\r\n"):
+        response_header.extend(receive_exact(stream, 1))
+        if len(response_header) > 65536:
+            raise AssertionError("WebSocket handshake headers were too large")
+    assert_secret_absent("WebSocket handshake", bytes(response_header))
+    header_lines = response_header.decode("iso-8859-1").split("\r\n")
+    if not header_lines[0].startswith("HTTP/1.1 101"):
+        raise AssertionError(f"WebSocket preview returned {header_lines[0]}")
+    response_headers = {
+        name.strip().lower(): value.strip()
+        for line in header_lines[1:]
+        if ":" in line
+        for name, value in [line.split(":", 1)]
+    }
+    expected_accept = base64.b64encode(
+        hashlib.sha1(
+            (websocket_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
+        ).digest()
+    ).decode()
+    if response_headers.get("sec-websocket-accept") != expected_accept:
+        raise AssertionError("WebSocket preview returned an invalid accept key")
+    if response_headers.get("content-security-policy") != expected_csp:
+        raise AssertionError("WebSocket preview omitted the opaque-origin CSP")
+
+    message = b"live-websocket-preview"
+    mask = os.urandom(4)
+    masked = bytes(value ^ mask[index % 4] for index, value in enumerate(message))
+    stream.sendall(bytes((0x81, 0x80 | len(message))) + mask + masked)
+    first = receive_exact(stream, 2)
+    if first[0] & 0x0F != 0x01:
+        raise AssertionError("WebSocket preview did not return a text frame")
+    length = first[1] & 0x7F
+    if length == 126:
+        length = struct.unpack("!H", receive_exact(stream, 2))[0]
+    elif length == 127:
+        length = struct.unpack("!Q", receive_exact(stream, 8))[0]
+    response_mask = receive_exact(stream, 4) if first[1] & 0x80 else b""
+    echoed = receive_exact(stream, length)
+    if response_mask:
+        echoed = bytes(
+            value ^ response_mask[index % 4] for index, value in enumerate(echoed)
+        )
+    assert_secret_absent("WebSocket payload", echoed)
+    if echoed != message:
+        raise AssertionError(f"unexpected WebSocket echo: {echoed!r}")
+print("ok: WebSocket preview")
+print(f"live pinned-core smoke passed at {CORE_REV}")
+PY
+
+say "live pinned-core smoke passed"
