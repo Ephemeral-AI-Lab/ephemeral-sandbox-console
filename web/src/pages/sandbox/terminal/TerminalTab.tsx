@@ -341,7 +341,7 @@ export function TerminalTab() {
                 : "Workspace session is finalizing"}
             >
               {selectedFinalizationState === "finalize_failed"
-                ? "Commands, files, and publishing are disabled. Use Close workspace session in the session list, then Discard & close to finish cleanup."
+                ? "Commands, files, and publishing are disabled. Use Finish cleanup beside the workspace session to close it."
                 : "Commands are disabled while this workspace session is finalizing."}
             </Alert>
           </Paper>

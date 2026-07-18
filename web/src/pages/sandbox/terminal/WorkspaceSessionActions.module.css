@@ -1,0 +1,14 @@
+.action:disabled,
+.action[data-loading] {
+  background-color: transparent !important;
+}
+
+.feedback {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.feedback code {
+  white-space: normal;
+}

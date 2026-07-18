@@ -23,6 +23,7 @@ const missing = fixtureParams.has("missing");
 type SessionFixtureDetail =
   | { action: "remove"; workspaceSessionId: string }
   | { action: "active"; workspaceSessionId: string }
+  | { action: "command-active"; workspaceSessionId: string }
   | { action: "finalizing"; workspaceSessionId: string }
   | { action: "finalize-failed"; workspaceSessionId: string };
 
@@ -166,8 +167,19 @@ function Fixture() {
                 workspace.workspace_id === detail.workspaceSessionId
                   ? {
                       ...workspace,
-                      finalization_state: detail.action,
-                      active_namespace_executions: [],
+                      finalization_state: detail.action === "finalize-failed"
+                        ? "finalize_failed"
+                        : detail.action === "finalizing"
+                          ? "finalizing"
+                          : "active",
+                      active_namespace_executions: detail.action === "command-active"
+                        ? [{
+                            namespace_execution_id: "late-running-command",
+                            operation: "exec_command",
+                            lifecycle_state: "running",
+                            command: "tail -f late.log",
+                          }]
+                        : [],
                     }
                   : workspace,
               ),
