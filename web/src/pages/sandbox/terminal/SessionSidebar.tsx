@@ -1,20 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
   Button,
-  Code,
   Divider,
   Drawer,
   Group,
   Menu,
-  Modal,
   NavLink,
   Paper,
   ScrollArea,
   Stack,
   Text,
-  TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { Globe2, Plus, Shield, Trash2 } from "lucide-react";
@@ -53,17 +50,9 @@ export function SessionSidebar({
 }) {
   const [createdSession, setCreatedSession] = useState<CreatedSession | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
-  const [destroyTargetId, setDestroyTargetId] = useState<string | null>(null);
-  const [destroyBusy, setDestroyBusy] = useState(false);
-  const [confirmation, setConfirmation] = useState("");
+  const [destroyingSessionId, setDestroyingSessionId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { showError } = useErrorToast();
-
-  const destroyTarget = useMemo(
-    () => workspaces.find((workspace) => workspace.workspace_id === destroyTargetId) ?? null,
-    [destroyTargetId, workspaces],
-  );
-  const activeCommands = destroyTarget?.active_namespace_executions.length ?? 0;
 
   const refreshSnapshot = () =>
     queryClient.invalidateQueries({ queryKey: ["sandbox", sandboxId, "snapshot"] });
@@ -105,26 +94,24 @@ export function SessionSidebar({
     }
   };
 
-  const destroySession = async () => {
+  const destroySession = async (workspaceSessionId: string) => {
+    const target = workspaces.find(
+      (workspace) => workspace.workspace_id === workspaceSessionId,
+    );
     if (
-      !destroyTarget ||
-      destroyBusy ||
-      activeCommands > 0 ||
-      confirmation !== destroyTarget.workspace_id
-    ) {
-      return;
-    }
-    setDestroyBusy(true);
+      !target ||
+      destroyingSessionId !== null ||
+      target.active_namespace_executions.length > 0
+    ) return;
+    setDestroyingSessionId(workspaceSessionId);
     try {
       const output = await rpc<WorkspaceSessionDestroyed>(
         "destroy_workspace_session",
         sandboxScope(sandboxId),
-        { workspace_session_id: destroyTarget.workspace_id },
+        { workspace_session_id: workspaceSessionId },
       );
-      setDestroyTargetId(null);
-      setConfirmation("");
-      if (mode === "session" && selected === destroyTarget.workspace_id) onSelect("quick");
-      void refreshSnapshot();
+      if (mode === "session" && selected === workspaceSessionId) onSelect("quick");
+      await refreshSnapshot();
       notifications.show({
         color: "success",
         title: "Workspace session destroyed",
@@ -133,7 +120,7 @@ export function SessionSidebar({
     } catch (error) {
       showError(error);
     } finally {
-      setDestroyBusy(false);
+      setDestroyingSessionId(null);
     }
   };
 
@@ -145,10 +132,8 @@ export function SessionSidebar({
       mode={mode}
       selected={selected}
       narrow={narrow}
-      onDestroy={(workspaceId) => {
-        setConfirmation("");
-        setDestroyTargetId(workspaceId);
-      }}
+      destroyingSessionId={destroyingSessionId}
+      onDestroy={(workspaceId) => void destroySession(workspaceId)}
       onSelect={onSelect}
       onCreate={(networkProfile) => void createSession(networkProfile)}
     />
@@ -178,54 +163,6 @@ export function SessionSidebar({
           {sessions}
         </Paper>
       )}
-
-      <Modal
-        opened={destroyTarget !== null}
-        onClose={() => {
-          if (!destroyBusy) setDestroyTargetId(null);
-        }}
-        closeButtonProps={{ "aria-label": "Close destroy workspace session", disabled: destroyBusy }}
-        closeOnEscape={!destroyBusy}
-        title="Destroy workspace session"
-        centered
-      >
-        {destroyTarget ? (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void destroySession();
-            }}
-          >
-            <Stack gap="md">
-              <Text size="sm">
-                This permanently discards unpublished changes in <Code>{destroyTarget.workspace_id}</Code>.
-              </Text>
-              <TextInput
-                autoComplete="off"
-                label="Type the workspace session ID to confirm"
-                value={confirmation}
-                disabled={destroyBusy}
-                onChange={(event) => setConfirmation(event.target.value)}
-                styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
-              />
-              <Group justify="flex-end">
-                <Button variant="subtle" disabled={destroyBusy} onClick={() => setDestroyTargetId(null)}>
-                  Cancel
-                </Button>
-                <Button
-                  color="danger"
-                  type="submit"
-                  loading={destroyBusy}
-                  disabled={confirmation !== destroyTarget.workspace_id || activeCommands > 0}
-                  leftSection={<Trash2 size={14} />}
-                >
-                  Destroy session
-                </Button>
-              </Group>
-            </Stack>
-          </form>
-        ) : null}
-      </Modal>
     </>
   );
 }
@@ -237,6 +174,7 @@ function SessionList({
   mode,
   selected,
   narrow,
+  destroyingSessionId,
   onDestroy,
   onCreate,
   onSelect,
@@ -247,6 +185,7 @@ function SessionList({
   mode: TerminalMode;
   selected: string | null;
   narrow: boolean;
+  destroyingSessionId: string | null;
   onDestroy: (workspaceId: string) => void;
   onCreate: (networkProfile: NetworkProfile) => void;
   onSelect: (mode: TerminalMode, sessionId?: string) => void;
@@ -332,7 +271,8 @@ function SessionList({
                   <ActionIcon
                     aria-label={destroyLabel}
                     color="danger"
-                    disabled={session.activeCommands > 0}
+                    disabled={session.activeCommands > 0 || destroyingSessionId !== null}
+                    loading={destroyingSessionId === session.workspaceSessionId}
                     onClick={() => onDestroy(session.workspaceSessionId)}
                     size={44}
                     title={

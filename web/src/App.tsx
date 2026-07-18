@@ -9,6 +9,7 @@ import { FilesTab } from "@/pages/sandbox/files/FilesTab";
 import { PreviewTab } from "@/pages/sandbox/preview/PreviewTab";
 import { ObservabilityTab } from "@/pages/sandbox/observability/ObservabilityTab";
 import { ResourcesView } from "@/pages/sandbox/observability/ResourcesView";
+import { DaemonView } from "@/pages/sandbox/observability/DaemonView";
 import { CgroupView } from "@/pages/sandbox/observability/CgroupView";
 import { TracesView } from "@/pages/sandbox/observability/TracesView";
 import { EventsView } from "@/pages/sandbox/observability/EventsView";
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="observability" element={<ObservabilityTab />}>
                 <Route index element={<Navigate to="resources" replace />} />
                 <Route path="resources" element={<ResourcesView />} />
+                <Route path="daemon" element={<DaemonView />} />
                 <Route path="cgroup" element={<CgroupView />} />
                 <Route path="traces" element={<TracesView />} />
                 <Route path="traces/:traceId" element={<TracesView />} />

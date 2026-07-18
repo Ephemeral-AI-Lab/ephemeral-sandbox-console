@@ -190,7 +190,12 @@ export function WorkspacePicker({
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const columnStripRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const openRef = useRef(open);
+  const onOpenChangeRef = useRef(onOpenChange);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  openRef.current = open;
+  onOpenChangeRef.current = onOpenChange;
   const selectedListing = useQuery({
     queryKey: ["workspace-directories", selectedPath],
     queryFn: () => listWorkspaceDirectories(selectedPath),
@@ -210,6 +215,19 @@ export function WorkspacePicker({
       });
     });
   }, [columnPaths]);
+
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing || !openRef.current) return;
+      event.preventDefault();
+      openRef.current = false;
+      onOpenChangeRef.current?.(false);
+      setOpen(false);
+      requestAnimationFrame(() => triggerRef.current?.focus());
+    };
+    window.addEventListener("keydown", onEscape, { capture: true });
+    return () => window.removeEventListener("keydown", onEscape, { capture: true });
+  }, []);
 
   const navigateTo = (directory: Directory, columnIndex: number) => {
     setColumnPaths((current) =>
@@ -235,12 +253,14 @@ export function WorkspacePicker({
   const closePicker = () => {
     onOpenChange?.(false);
     setOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
   return (
     <>
       <Button
         id={id}
+        ref={triggerRef}
         type="button"
         variant="outline"
         justify="flex-start"
@@ -259,19 +279,20 @@ export function WorkspacePicker({
           {value || "Select a folder…"}
         </Text>
       </Button>
-      <Modal
-        opened={open}
-        onClose={closePicker}
-        closeOnEscape
-        closeButtonProps={{ "aria-label": "Close workspace picker" }}
-        title="Select workspace folder"
-        centered
-        size="xl"
-        styles={{
-          body: { display: "flex", flexDirection: "column", minHeight: 0 },
-          content: { maxWidth: "calc(100vw - 2rem)" },
-        }}
-      >
+      {open ? (
+        <Modal
+          opened
+          onClose={closePicker}
+          closeOnEscape
+          closeButtonProps={{ "aria-label": "Close workspace picker" }}
+          title="Select workspace folder"
+          centered
+          size="xl"
+          styles={{
+            body: { display: "flex", flexDirection: "column", minHeight: 0 },
+            content: { maxWidth: "calc(100vw - 2rem)" },
+          }}
+        >
         <Stack data-workspace-picker gap="sm">
           <Group data-workspace-picker-toolbar gap="xs" wrap="nowrap">
             <Button
@@ -301,7 +322,7 @@ export function WorkspacePicker({
               title={selectedPath ?? undefined}
               truncate
             >
-              {selectedPath ?? "Choose a folder"}
+              {folderName(selectedPath)}
             </Text>
             <Button
               aria-pressed={searchOpen}
@@ -383,7 +404,8 @@ export function WorkspacePicker({
             </Button>
           </Group>
         </Stack>
-      </Modal>
+        </Modal>
+      ) : null}
     </>
   );
 }

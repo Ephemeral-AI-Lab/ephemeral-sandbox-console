@@ -91,6 +91,38 @@ export interface WorkspaceProcessTopology {
   truncated: boolean;
   warnings: string[];
   workspaces: WorkspaceProcesses[];
+  daemon?: DaemonProcessMetrics | null;
+}
+
+export interface DaemonProcessMetrics {
+  available: boolean;
+  error: string | null;
+  sampled_at_unix_ms: number;
+  pid: number;
+  name: string | null;
+  state: string | null;
+  virtual_memory_bytes: number | null;
+  resident_memory_bytes: number | null;
+  peak_resident_memory_bytes: number | null;
+  proportional_set_size_bytes: number | null;
+  unique_set_size_bytes: number | null;
+  anonymous_memory_bytes: number | null;
+  file_memory_bytes: number | null;
+  shared_memory_bytes: number | null;
+  data_memory_bytes: number | null;
+  swap_bytes: number | null;
+  cpu_time_us: number | null;
+  start_time_ticks: number | null;
+  thread_count: number | null;
+  file_descriptor_count: number | null;
+  io_read_bytes: number | null;
+  io_write_bytes: number | null;
+  read_syscalls: number | null;
+  write_syscalls: number | null;
+  voluntary_context_switches: number | null;
+  involuntary_context_switches: number | null;
+  cgroup_memberships: string[];
+  warnings: string[];
 }
 
 export interface WorkspaceProcesses {

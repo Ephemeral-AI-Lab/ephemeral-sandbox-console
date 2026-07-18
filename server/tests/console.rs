@@ -18,5 +18,7 @@ mod health_tests;
 mod proxy_tests;
 #[path = "console/rpc.rs"]
 mod rpc_tests;
+#[path = "console/sandbox_clusters.rs"]
+mod sandbox_clusters_tests;
 #[path = "console/server.rs"]
 mod server_tests;

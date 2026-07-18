@@ -24,6 +24,10 @@ async fn serve_until_stops_accepting_after_cancellation() {
             gateway_auth_token: Some(support::TEST_AUTH_TOKEN.to_owned()),
         },
         assets_dir: None,
+        cluster_registry_path: std::env::temp_dir().join(format!(
+            "sandbox-console-clusters-{}.json",
+            uuid::Uuid::new_v4()
+        )),
         rpc_timeout: Duration::from_secs(5),
         health_probe_timeout: Duration::from_secs(2),
         proxy_connect_timeout: Duration::from_secs(10),

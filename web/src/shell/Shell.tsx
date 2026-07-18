@@ -13,8 +13,7 @@ import {
   VisuallyHidden,
 } from "@mantine/core";
 import { Link, Outlet, useLocation } from "react-router";
-import { PRODUCT_NAME } from "@/config/brand";
-import { CreateSandboxModal } from "@/pages/fleet/CreateSandboxModal";
+import { BRAND, PRODUCT_NAME } from "@/config/brand";
 import {
   DashboardShellContext,
   type DashboardConnectionState,
@@ -30,6 +29,7 @@ const TAB_LABELS: Record<string, string> = {
 
 const OBSERVABILITY_LABELS: Record<string, string> = {
   resources: "Resources",
+  daemon: "Daemon",
   cgroup: "Processes",
   traces: "Traces",
   events: "Events",
@@ -98,6 +98,7 @@ function navigationItems(pathname: string): NavigationItem[] {
     item("Files", "files"),
     item("Observability", "observability"),
     item("Resources", "observability/resources", true),
+    item("Daemon", "observability/daemon", true),
     item("Processes", "observability/cgroup", true),
     item("Traces", "observability/traces", true),
     item("Events", "observability/events", true),
@@ -138,8 +139,8 @@ export function Shell() {
         data-dashboard-shell={isDashboard || undefined}
         header={{
           height: isDashboard
-            ? { base: "64px", sm: "80px" }
-            : "44px",
+            ? "64px"
+            : "52px",
         }}
         padding={0}
       >
@@ -167,6 +168,14 @@ export function Shell() {
                 to="/"
                 underline="never"
               >
+                <picture aria-hidden className={styles.brandMark}>
+                  <source srcSet={BRAND.mascot.webpUrl} type="image/webp" />
+                  <img
+                    alt=""
+                    draggable="false"
+                    src={BRAND.mascot.pngUrl}
+                  />
+                </picture>
                 <Text className={styles.brandName} fw={700} truncate>
                   {PRODUCT_NAME}
                 </Text>
@@ -209,10 +218,6 @@ export function Shell() {
                 </Box>
               ) : null}
             </Group>
-
-            {isDashboard ? (
-              <CreateSandboxModal compactOnNarrow onStream={setCreateLogs} />
-            ) : null}
           </Group>
         </AppShell.Header>
 

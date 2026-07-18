@@ -27,11 +27,13 @@ function ResourceMetric({ label, value }: { label: string; value: string }) {
 }
 
 export function SandboxCard({
+  clusterId,
   createLogs,
   record,
   snapshot,
   usage,
 }: {
+  clusterId?: string;
   createLogs: string[] | undefined;
   record: SandboxRecord;
   snapshot: SandboxSnapshot | undefined;
@@ -63,12 +65,25 @@ export function SandboxCard({
           >
             {record.id}
           </span>
-          <span
-            className={styles.statusBadge}
-            data-pulse={view.status.pulse || undefined}
-          >
-            <span aria-hidden className={styles.statusDot} />
-            {view.status.label}
+          <span className={styles.cardBadges}>
+            {clusterId ? (
+              <Link
+                aria-label={`View cluster ${clusterId}`}
+                className={styles.membershipBadge}
+                data-cluster-membership
+                title={`View cluster ${clusterId}`}
+                to={`/?${new URLSearchParams({ view: "cluster", q: clusterId })}`}
+              >
+                {clusterId}
+              </Link>
+            ) : null}
+            <span
+              className={styles.statusBadge}
+              data-pulse={view.status.pulse || undefined}
+            >
+              <span aria-hidden className={styles.statusDot} />
+              {view.status.label}
+            </span>
           </span>
         </header>
 
@@ -114,11 +129,14 @@ export function SandboxCard({
             <Button className={styles.primaryAction} disabled variant="light">
               {progressLabel}
             </Button>
+          ) : view.primaryAction?.disabled ? (
+            <Button className={styles.primaryAction} disabled variant="light">
+              {view.primaryAction.label}
+            </Button>
           ) : view.primaryAction ? (
             <Button
               className={styles.primaryAction}
               component={Link}
-              disabled={view.primaryAction.disabled}
               to={destination}
               variant={view.primaryAction.kind === "open" ? "filled" : "light"}
             >

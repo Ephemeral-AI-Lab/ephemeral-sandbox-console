@@ -38,6 +38,36 @@ const topology: WorkspaceProcessTopology = {
   error: null,
   truncated: false,
   warnings: [],
+  daemon: {
+    available: true,
+    error: null,
+    sampled_at_unix_ms: NOW,
+    pid: 8,
+    name: "sandbox-daemon",
+    state: "S (sleeping)",
+    virtual_memory_bytes: 118_000_000,
+    resident_memory_bytes: 30_000_000,
+    peak_resident_memory_bytes: 33_000_000,
+    proportional_set_size_bytes: 28_000_000,
+    unique_set_size_bytes: 26_000_000,
+    anonymous_memory_bytes: 25_000_000,
+    file_memory_bytes: 4_000_000,
+    shared_memory_bytes: 1_000_000,
+    data_memory_bytes: 27_000_000,
+    swap_bytes: 0,
+    cpu_time_us: 1_000_000,
+    start_time_ticks: 123,
+    thread_count: 37,
+    file_descriptor_count: 15,
+    io_read_bytes: 4_096,
+    io_write_bytes: 8_192,
+    read_syscalls: 41,
+    write_syscalls: 17,
+    voluntary_context_switches: 120,
+    involuntary_context_switches: 3,
+    cgroup_memberships: ["0::/_daemon"],
+    warnings: [],
+  },
   workspaces: [
     {
       workspace_id: "workspace-active",
@@ -103,12 +133,14 @@ async function installObservabilityApi(
   page: Page,
   eventCount = 2_000,
   includeTopology = false,
+  daemonCapture = false,
 ): Promise<FixtureApi> {
   const fixtureEvents = eventCount === 2_000 ? events : makeEvents(eventCount);
   const fixtureTrace = eventCount === 2_000 ? trace : traceFor(fixtureEvents);
   let eventsFail = false;
   let eventsCalls = 0;
   let cgroupFail = false;
+  let cgroupCalls = 0;
   let currentTopology = topology;
   await page.route("**/api/rpc", async (route) => {
     const { op, args } = route.request().postDataJSON() as { op: string; args: Record<string, unknown> };
@@ -126,6 +158,7 @@ async function installObservabilityApi(
       return;
     }
     if (op === "cgroup") {
+      cgroupCalls += 1;
       if (cgroupFail) {
         await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { kind: "fixture_error", message: "topology refresh unavailable" } }) });
         return;
@@ -135,8 +168,25 @@ async function installObservabilityApi(
         body: JSON.stringify({
           view: "cgroup",
           scope: String(args.scope ?? "sandbox"),
-          series: samples,
-          ...(includeTopology ? { topology: currentTopology } : {}),
+          series: daemonCapture
+            ? samples.map((sample) => ({ ...sample, metrics: { ...sample.metrics, mem_cur: 74_000_000 } }))
+            : samples,
+          ...(includeTopology ? {
+            topology: currentTopology.daemon === undefined || currentTopology.daemon === null
+              ? currentTopology
+              : {
+                  ...currentTopology,
+                  daemon: {
+                    ...currentTopology.daemon,
+                    sampled_at_unix_ms: NOW + cgroupCalls * 400,
+                    cpu_time_us: (currentTopology.daemon.cpu_time_us ?? 0) + cgroupCalls * 24_000,
+                    io_read_bytes: (currentTopology.daemon.io_read_bytes ?? 0) + cgroupCalls * 16_384,
+                    io_write_bytes: (currentTopology.daemon.io_write_bytes ?? 0) + cgroupCalls * 8_192,
+                    voluntary_context_switches: (currentTopology.daemon.voluntary_context_switches ?? 0) + cgroupCalls * 12,
+                    involuntary_context_switches: (currentTopology.daemon.involuntary_context_switches ?? 0) + cgroupCalls,
+                  },
+                },
+          } : {}),
         }),
       });
       return;
@@ -178,17 +228,23 @@ async function installObservabilityApi(
 
 async function openView(
   page: Page,
-  view: "events" | "resources" | "cgroup" | "traces" | "layers",
+  view: "events" | "resources" | "cgroup" | "daemon" | "traces" | "layers",
   eventCount = 2_000,
   includeTopology = false,
 ) {
-  const api = await installObservabilityApi(page, eventCount, includeTopology || view === "cgroup");
+  const api = await installObservabilityApi(
+    page,
+    eventCount,
+    includeTopology || view === "cgroup" || view === "daemon",
+    view === "daemon",
+  );
   await page.clock.setFixedTime(NOW);
   await page.goto(`/p07-observability.html?view=${view}`);
   const ready = {
     events: `event-${String(eventCount - 1).padStart(4, "0")}`,
     resources: "CPU (Δ cpu_usec / s)",
     cgroup: "Workspace process topology",
+    daemon: "Daemon diagnostic capture",
     traces: "fixture.root",
     layers: "fixture-layer-2",
   }[view];
@@ -349,6 +405,18 @@ test("P07 cgroup view shows process placement reported by the daemon", async ({ 
   await expect(page.locator('[data-workspace-id="workspace-idle"] [data-workspace-idle]')).toBeVisible();
   await expect(page.locator('[data-workspace-id="workspace-partial"]')).toContainText("Workspace topology is partial");
   await expect(page.locator("[data-process-topology]")).not.toContainText("delegated");
+});
+
+test("P07 daemon diagnostics persist a bounded capture and render close monitoring charts", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openView(page, "daemon");
+  await page.getByText("400 ms", { exact: true }).click();
+  await expect(page.locator("[data-daemon-history-charts] .uplot")).toHaveCount(6, { timeout: 4_000 });
+  const storedCapture = page.getByText("Captured on disk").locator("..").getByText(/[1-9]\d* \/ 900/);
+  await expect(storedCapture).toBeVisible();
+  await page.reload();
+  await expect(storedCapture).toBeVisible();
+  await expect(page.getByText("Disk-backed diagnostic mode")).toBeVisible();
 });
 
 test("P07 process topology distinguishes empty, unavailable, and stale refresh states", async ({ page }) => {

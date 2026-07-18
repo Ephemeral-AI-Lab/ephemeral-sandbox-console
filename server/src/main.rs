@@ -26,6 +26,9 @@ struct Cli {
     #[arg(long = "assets", value_name = "DIR")]
     assets_dir: Option<PathBuf>,
 
+    #[arg(long = "cluster-registry", value_name = "FILE")]
+    cluster_registry_path: Option<PathBuf>,
+
     #[arg(long = "rpc-timeout-ms", value_name = "MS")]
     rpc_timeout_ms: Option<u64>,
 
@@ -39,6 +42,7 @@ async fn main() -> ExitCode {
     let overrides = ConsoleConfigOverrides {
         bind: cli.bind,
         assets_dir: cli.assets_dir,
+        cluster_registry_path: cli.cluster_registry_path,
         rpc_timeout_ms: cli.rpc_timeout_ms,
         config_yaml: cli.config_yaml,
         gateway: GatewayConfigOverrides {

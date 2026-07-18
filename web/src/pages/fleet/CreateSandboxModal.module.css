@@ -39,6 +39,11 @@
   flex-direction: column;
 }
 
+.modeSwitch {
+  margin: var(--mantine-spacing-xl) var(--mantine-spacing-xl) 0;
+  width: calc(100% - (2 * var(--mantine-spacing-xl)));
+}
+
 .fields {
   padding: var(--mantine-spacing-xl);
 }
@@ -84,5 +89,10 @@
 
   .actions {
     padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
+  }
+
+  .modeSwitch {
+    margin: var(--mantine-spacing-lg) var(--mantine-spacing-lg) 0;
+    width: calc(100% - (2 * var(--mantine-spacing-lg)));
   }
 }

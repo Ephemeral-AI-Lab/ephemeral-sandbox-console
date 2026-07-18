@@ -22,5 +22,6 @@ pub mod proxy;
 pub mod response;
 pub mod router;
 pub mod rpc;
+pub mod sandbox_clusters;
 pub mod server;
 pub mod state;

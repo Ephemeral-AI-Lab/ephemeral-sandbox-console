@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 pub const SANDBOX_CONSOLE_BIND_ENV: &str = "SANDBOX_CONSOLE_BIND";
 pub const SANDBOX_CONSOLE_ASSETS_ENV: &str = "SANDBOX_CONSOLE_ASSETS";
+pub const SANDBOX_CONSOLE_CLUSTER_REGISTRY_ENV: &str = "SANDBOX_CONSOLE_CLUSTER_REGISTRY";
 pub const SANDBOX_CONSOLE_CONFIG_YAML_ENV: &str = "SANDBOX_CONSOLE_CONFIG_YAML";
 
 const DEFAULT_ASSET_DIRS: &[&str] = &["dist/console", "web/dist"];
@@ -85,6 +86,7 @@ pub struct ConsoleConfig {
     pub bind: String,
     pub gateway: GatewayConfig,
     pub assets_dir: Option<PathBuf>,
+    pub cluster_registry_path: PathBuf,
     pub rpc_timeout: Duration,
     pub health_probe_timeout: Duration,
     pub proxy_connect_timeout: Duration,
@@ -97,6 +99,7 @@ pub struct ConsoleConfig {
 pub struct ConsoleConfigOverrides {
     pub bind: Option<String>,
     pub assets_dir: Option<PathBuf>,
+    pub cluster_registry_path: Option<PathBuf>,
     pub rpc_timeout_ms: Option<u64>,
     pub config_yaml: Option<PathBuf>,
     pub gateway: GatewayConfigOverrides,
@@ -121,6 +124,7 @@ impl ConsoleConfig {
             overrides,
             std::env::var(SANDBOX_CONSOLE_BIND_ENV).ok(),
             std::env::var_os(SANDBOX_CONSOLE_ASSETS_ENV).map(PathBuf::from),
+            std::env::var_os(SANDBOX_CONSOLE_CLUSTER_REGISTRY_ENV).map(PathBuf::from),
             section,
             gateway,
         ))
@@ -135,6 +139,7 @@ impl ConsoleConfig {
         overrides: ConsoleConfigOverrides,
         env_bind: Option<String>,
         env_assets: Option<PathBuf>,
+        env_cluster_registry: Option<PathBuf>,
         section: ConsoleSection,
         gateway: GatewayConfig,
     ) -> Self {
@@ -146,6 +151,10 @@ impl ConsoleConfig {
             .assets_dir
             .or(env_assets)
             .or_else(default_assets_dir);
+        let cluster_registry_path = overrides
+            .cluster_registry_path
+            .or(env_cluster_registry)
+            .unwrap_or_else(default_cluster_registry_path);
         let rpc_timeout = overrides.rpc_timeout_ms.map_or_else(
             || Duration::from_secs_f64(section.rpc_timeout_s),
             Duration::from_millis,
@@ -154,6 +163,7 @@ impl ConsoleConfig {
             bind,
             gateway,
             assets_dir,
+            cluster_registry_path,
             rpc_timeout,
             health_probe_timeout: Duration::from_secs_f64(section.health_probe_timeout_s),
             proxy_connect_timeout: Duration::from_secs_f64(section.proxy_connect_timeout_s),
@@ -185,4 +195,22 @@ fn default_assets_dir() -> Option<PathBuf> {
         .iter()
         .map(PathBuf::from)
         .find(|dir| dir.join("index.html").is_file())
+}
+
+fn default_cluster_registry_path() -> PathBuf {
+    if let Some(state_home) = std::env::var_os("XDG_STATE_HOME") {
+        return PathBuf::from(state_home)
+            .join("ephemeral-sandbox-console")
+            .join("sandbox-clusters.json");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("state")
+            .join("ephemeral-sandbox-console")
+            .join("sandbox-clusters.json");
+    }
+    std::env::temp_dir()
+        .join("ephemeral-sandbox-console")
+        .join("sandbox-clusters.json")
 }

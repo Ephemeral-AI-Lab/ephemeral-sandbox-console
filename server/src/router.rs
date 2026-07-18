@@ -10,7 +10,7 @@ use hyper::body::Incoming;
 use crate::auth::DESKTOP_BOOTSTRAP_PATH;
 use crate::response::{self, BoxBody};
 use crate::state::AppState;
-use crate::{assets, catalog, daemon_api, health, proxy, rpc};
+use crate::{assets, catalog, daemon_api, health, proxy, rpc, sandbox_clusters};
 
 pub async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<BoxBody> {
     let path = req.uri().path().to_owned();
@@ -71,6 +71,9 @@ pub async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Box
             return response::text(StatusCode::METHOD_NOT_ALLOWED, "use GET");
         }
         return catalog::handle();
+    }
+    if path == "/api/sandbox-clusters" {
+        return sandbox_clusters::handle(&state.sandbox_clusters, req).await;
     }
     if let Some(route) = daemon_api::route(&path) {
         if req.method() != Method::POST {

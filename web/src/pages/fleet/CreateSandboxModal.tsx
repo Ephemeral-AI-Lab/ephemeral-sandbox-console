@@ -1,7 +1,17 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { Button, Group, Input, Modal, Select, Stack, Text, TextInput } from "@mantine/core";
+import {
+  Button,
+  Group,
+  Input,
+  Modal,
+  SegmentedControl,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+} from "@mantine/core";
 import {
   buildArgs,
   findOperation,
@@ -10,9 +20,13 @@ import {
 } from "@/api/catalog";
 import { listDockerImages } from "@/api/hostResources";
 import { rpcStream, systemScope } from "@/api/rpc";
+import type { SandboxList, SandboxRecord } from "@/api/types";
 import { useErrorToast } from "@/components/ErrorToast";
+import { registerSandboxCluster } from "@/core/sandboxClusters";
 import { WorkspacePicker } from "@/pages/fleet/WorkspacePicker";
 import classes from "@/pages/fleet/CreateSandboxModal.module.css";
+
+type CreationMode = "sandbox" | "cluster";
 
 function defaultValues(spec: OperationSpecDoc | undefined): Record<string, string> {
   const values: Record<string, string> = {};
@@ -29,13 +43,12 @@ function defaultValues(spec: OperationSpecDoc | undefined): Record<string, strin
  * card, the web equivalent of the CLI's `--progress`.
  */
 export function CreateSandboxModal({
-  compactOnNarrow = false,
   onStream,
 }: {
-  compactOnNarrow?: boolean;
   onStream: (logs: string[] | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [creationMode, setCreationMode] = useState<CreationMode>("sandbox");
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -58,7 +71,16 @@ export function CreateSandboxModal({
 
   const submit = async () => {
     if (!spec) return;
-    const built = buildArgs(spec.args, values);
+    const submittedMode = creationMode;
+    const submissionValues =
+      submittedMode === "sandbox" ? { ...values, count: "1" } : values;
+    const built = buildArgs(spec.args, submissionValues);
+    if (
+      submittedMode === "cluster" &&
+      (typeof built.args.count !== "number" || built.args.count < 1)
+    ) {
+      built.errors.count = "count must be an integer of 1 or more";
+    }
     setErrors(built.errors);
     if (Object.keys(built.errors).length > 0) return;
     setBusy(true);
@@ -66,11 +88,20 @@ export function CreateSandboxModal({
     onStream(logs.slice());
     setOpen(false);
     try {
-      await rpcStream("create_sandbox", systemScope, built.args, (line) => {
-        logs.push(line);
-        onStream(logs.slice());
-        void queryClient.invalidateQueries({ queryKey: ["fleet"] });
+      const created = await rpcStream<SandboxRecord | SandboxList>(
+        "create_sandbox",
+        systemScope,
+        built.args,
+        (line) => {
+          logs.push(line);
+          onStream(logs.slice());
+          void queryClient.invalidateQueries({ queryKey: ["fleet"] });
+        },
+      );
+      await registerSandboxCluster(created, {
+        allowSingleMember: submittedMode === "cluster",
       });
+      void queryClient.invalidateQueries({ queryKey: ["sandbox-clusters"] });
       void queryClient.invalidateQueries({ queryKey: ["fleet"] });
     } catch (error) {
       showError(error);
@@ -82,6 +113,7 @@ export function CreateSandboxModal({
   };
 
   const openModal = () => {
+    setCreationMode("sandbox");
     setOpen(true);
     setWorkspacePickerOpen(false);
     setErrors({});
@@ -91,19 +123,14 @@ export function CreateSandboxModal({
   return (
     <>
       <Button
-        aria-label="New Sandbox"
-        data-new-sandbox-trigger
+        aria-label="Create sandbox"
+        data-create-sandbox-trigger
         leftSection={<Plus aria-hidden size={16} />}
         variant="filled"
         disabled={busy}
         onClick={openModal}
       >
-        {busy ? "Creating…" : compactOnNarrow ? (
-          <>
-            <span data-new-label-full>New Sandbox</span>
-            <span data-new-label-short>New</span>
-          </>
-        ) : "New Sandbox"}
+        {busy ? "Creating…" : "Create sandbox"}
       </Button>
       <Modal.Root
         opened={open}
@@ -132,81 +159,126 @@ export function CreateSandboxModal({
                 void submit();
               }}
             >
+              <SegmentedControl
+                aria-label="Creation mode"
+                className={classes.modeSwitch}
+                data-creation-mode-switch
+                data={[
+                  { label: "Sandbox", value: "sandbox" },
+                  { label: "Cluster", value: "cluster" },
+                ]}
+                fullWidth
+                onChange={(value) => {
+                  const nextMode = value as CreationMode;
+                  setCreationMode(nextMode);
+                  setErrors({});
+                  if (nextMode === "cluster") {
+                    setValues((current) => ({
+                      ...current,
+                      count: current.count?.trim() ? current.count : "1",
+                    }));
+                  }
+                }}
+                value={creationMode}
+              />
               <Stack className={classes.fields} gap="lg">
-                {(spec?.args ?? []).map((arg) => {
-                  const error =
-                    errors[arg.name] ??
-                    (arg.name === "image" && images.isError
-                      ? (images.error as Error).message
-                      : arg.name === "image" && images.data?.length === 0
-                        ? "No Docker images are available."
-                        : undefined);
+                {(spec?.args ?? [])
+                  .filter((arg) => creationMode === "cluster" || arg.name !== "count")
+                  .map((arg) => {
+                    const error =
+                      errors[arg.name] ??
+                      (arg.name === "image" && images.isError
+                        ? (images.error as Error).message
+                        : arg.name === "image" && images.data?.length === 0
+                          ? "No Docker images are available."
+                          : undefined);
 
-                  return (
-                    <Input.Wrapper
-                      key={arg.name}
-                      className={classes.field}
-                      id={`create-${arg.name}`}
-                      label={<Text component="span" ff="monospace" size="sm">{arg.name}</Text>}
-                      required={arg.required}
-                      description={error ? undefined : arg.help}
-                      error={error}
-                    >
-                      {arg.name === "image" ? (
-                        <Select
-                          id={`create-${arg.name}`}
-                          value={values[arg.name] ?? ""}
-                          onChange={(value) =>
-                            setValues((current) => ({ ...current, [arg.name]: value ?? "" }))
-                          }
-                          data={images.data ?? []}
-                          placeholder={
-                            images.isPending ? "Loading Docker images…" : "Select a Docker image"
-                          }
-                          size="md"
-                          disabled={
-                            images.isPending ||
-                            images.isError ||
-                            (images.data?.length ?? 0) === 0
-                          }
-                        />
-                      ) : arg.name === "workspace_root" ? (
-                        <WorkspacePicker
-                          id={`create-${arg.name}`}
-                          value={values[arg.name] ?? ""}
-                          onOpenChange={setWorkspacePickerOpen}
-                          onChange={(path) =>
-                            setValues((current) => ({ ...current, [arg.name]: path }))
-                          }
-                        />
-                      ) : (
-                        <TextInput
-                          id={`create-${arg.name}`}
-                          type={arg.name === "count" ? "number" : undefined}
-                          min={arg.name === "count" ? 1 : undefined}
-                          step={arg.name === "count" ? 1 : undefined}
-                          inputMode={arg.name === "count" ? "numeric" : undefined}
-                          value={values[arg.name] ?? ""}
-                          size="md"
-                          onChange={(event) =>
-                            setValues((current) => ({
-                              ...current,
-                              [arg.name]: event.target.value,
-                            }))
-                          }
-                          placeholder={arg.help}
-                        />
-                      )}
-                    </Input.Wrapper>
-                  );
-                })}
+                    return (
+                      <Input.Wrapper
+                        key={arg.name}
+                        className={classes.field}
+                        id={`create-${arg.name}`}
+                        label={
+                          <Text component="span" ff="monospace" size="sm">
+                            {arg.name}
+                          </Text>
+                        }
+                        required={
+                          arg.required ||
+                          (creationMode === "cluster" && arg.name === "count")
+                        }
+                        description={
+                          error
+                            ? undefined
+                            : arg.name === "count"
+                              ? "1 or more sandboxes"
+                              : arg.help
+                        }
+                        error={error}
+                      >
+                        {arg.name === "image" ? (
+                          <Select
+                            id={`create-${arg.name}`}
+                            value={values[arg.name] ?? ""}
+                            onChange={(value) =>
+                              setValues((current) => ({
+                                ...current,
+                                [arg.name]: value ?? "",
+                              }))
+                            }
+                            data={images.data ?? []}
+                            placeholder={
+                              images.isPending
+                                ? "Loading Docker images…"
+                                : "Select a Docker image"
+                            }
+                            size="md"
+                            disabled={
+                              images.isPending ||
+                              images.isError ||
+                              (images.data?.length ?? 0) === 0
+                            }
+                          />
+                        ) : arg.name === "workspace_root" ? (
+                          <WorkspacePicker
+                            id={`create-${arg.name}`}
+                            value={values[arg.name] ?? ""}
+                            onOpenChange={setWorkspacePickerOpen}
+                            onChange={(path) =>
+                              setValues((current) => ({
+                                ...current,
+                                [arg.name]: path,
+                              }))
+                            }
+                          />
+                        ) : (
+                          <TextInput
+                            id={`create-${arg.name}`}
+                            type={arg.name === "count" ? "number" : undefined}
+                            min={arg.name === "count" ? 1 : undefined}
+                            step={arg.name === "count" ? 1 : undefined}
+                            inputMode={arg.name === "count" ? "numeric" : undefined}
+                            value={values[arg.name] ?? ""}
+                            size="md"
+                            onChange={(event) =>
+                              setValues((current) => ({
+                                ...current,
+                                [arg.name]: event.target.value,
+                              }))
+                            }
+                            placeholder={arg.help}
+                          />
+                        )}
+                      </Input.Wrapper>
+                    );
+                  })}
               </Stack>
               <Group className={classes.actions} justify="flex-end" gap="sm">
                 <Button size="sm" variant="subtle" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
                 <Button size="sm" variant="filled" type="submit" disabled={!spec}>
-                  Create sandbox
+                  {creationMode === "sandbox" ? "Create sandbox" : "Create cluster"}
                 </Button>
               </Group>
             </form>

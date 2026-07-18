@@ -6,6 +6,13 @@ type SandboxState = "creating" | "ready" | "stopping" | "stopped" | "failed";
 
 type SandboxRecord = ReturnType<typeof record>;
 
+type SandboxClusterRecord = {
+  id: string;
+  memberIds: string[];
+  workspaceRoot: string;
+  createdAt: string;
+};
+
 function record(
   id: string,
   state: SandboxState = "ready",
@@ -152,6 +159,7 @@ const catalog = {
 
 type FixtureOptions = {
   list?: SandboxRecord[];
+  clusters?: SandboxClusterRecord[];
   failList?: boolean;
   failAfterFirstList?: boolean;
   listDelayMs?: number;
@@ -167,6 +175,7 @@ async function installFleetApi(page: Page, options: FixtureOptions = {}) {
       records(7, ["ready", "ready", "failed", "creating", "stopped"])),
   ];
   let listCalls = 0;
+  let clusters = [...(options.clusters ?? [])];
   const failSnapshotIds = new Set(options.failSnapshotIds ?? []);
   const emptyUsageIds = new Set(options.emptyUsageIds ?? []);
   const rootDirectories = Array.from({ length: 500 }, (_, index) => ({
@@ -190,6 +199,36 @@ async function installFleetApi(page: Page, options: FixtureOptions = {}) {
       body: JSON.stringify({ status: "ok" }),
     }),
   );
+  await page.route("**/api/sandbox-clusters", async (route) => {
+    const method = route.request().method();
+    if (method === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ clusters }),
+      });
+      return;
+    }
+    if (method === "POST") {
+      const cluster = route.request().postDataJSON() as SandboxClusterRecord;
+      clusters = [...clusters.filter((candidate) => candidate.id !== cluster.id), cluster];
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(cluster),
+      });
+      return;
+    }
+    if (method === "DELETE") {
+      const { id } = route.request().postDataJSON() as { id: string };
+      const previousCount = clusters.length;
+      clusters = clusters.filter((cluster) => cluster.id !== id);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ id, removed: clusters.length < previousCount }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 405, body: "unsupported cluster method" });
+  });
   await page.route("**/api/rpc", async (route) => {
     const { op, scope, args } = route.request().postDataJSON() as {
       op: string;
@@ -404,10 +443,38 @@ function distinctPositions(values: number[], tolerance = 3): number[] {
 }
 
 const requiredViewports = [
-  { width: 375, height: 812, cardColumns: 1, metricColumns: 2, headerHeight: 64 },
-  { width: 768, height: 1024, cardColumns: 2, metricColumns: 2, headerHeight: 80 },
-  { width: 1024, height: 768, cardColumns: 2, metricColumns: 2, headerHeight: 80 },
-  { width: 1440, height: 900, cardColumns: 3, metricColumns: 4, headerHeight: 80 },
+  {
+    width: 375,
+    height: 812,
+    cardColumns: 1,
+    metricColumns: 2,
+    headerHeight: 64,
+    minCardHeight: 260,
+  },
+  {
+    width: 768,
+    height: 1024,
+    cardColumns: 1,
+    metricColumns: 4,
+    headerHeight: 64,
+    minCardHeight: 202,
+  },
+  {
+    width: 1024,
+    height: 768,
+    cardColumns: 1,
+    metricColumns: 4,
+    headerHeight: 64,
+    minCardHeight: 202,
+  },
+  {
+    width: 1440,
+    height: 900,
+    cardColumns: 1,
+    metricColumns: 4,
+    headerHeight: 64,
+    minCardHeight: 98,
+  },
 ] as const;
 
 for (const { width, height } of requiredViewports) {
@@ -434,8 +501,18 @@ test("P05 header, connection, summary, and page landmarks use the Phase 1 surfac
   ).toBeVisible();
   await expect(page.getByRole("status", { name: "Console Connected" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "New Sandbox" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: "Your sandboxes" })).toBeVisible();
+  const titleRow = page.locator("[data-collection-title-row]");
+  await expect(
+    titleRow.getByRole("heading", { level: 1, name: "Your sandboxes" }),
+  ).toBeVisible();
+  await expect(titleRow.locator("[data-create-sandbox-trigger]")).toBeVisible();
+  const collectionToolbar = page.locator("[data-collection-toolbar]");
+  await expect(collectionToolbar.locator("[data-sandbox-view-switcher]")).toBeVisible();
+  await expect(collectionToolbar.locator("[data-fleet-filter]")).toBeVisible();
+  await expect(page.locator("header [data-create-sandbox-trigger]")).toHaveCount(0);
+  await expect(
+    page.locator('[aria-labelledby="dashboard-title"] [data-create-sandbox-trigger]'),
+  ).toBeVisible();
   await expect(page.locator("main#main-content")).toBeVisible();
   await expect(
     page.locator("footer").filter({ has: page.locator("[data-connection-state]") }),
@@ -447,12 +524,132 @@ test("P05 header, connection, summary, and page landmarks use the Phase 1 surfac
   await expectMetric(page, "Avg Memory", "23MiB");
 });
 
+test("P05 uses one create action with sandbox and cluster modes", async ({ page }) => {
+  await openFleet(page, { list: [record("existing-sandbox")] });
+
+  await expect(page.locator("[data-create-sandbox-trigger]")).toHaveCount(1);
+  await page.getByRole("button", { name: "Create sandbox" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create sandbox" });
+  const modeSwitch = dialog.locator("[data-creation-mode-switch]");
+
+  await expect(modeSwitch.getByText("Sandbox", { exact: true })).toBeVisible();
+  await expect(modeSwitch.getByText("Cluster", { exact: true })).toBeVisible();
+  await expect(dialog.locator("#create-count")).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Create sandbox", exact: true }),
+  ).toBeVisible();
+
+  await modeSwitch.getByText("Cluster", { exact: true }).click();
+  await expect(dialog.locator("#create-count")).toHaveValue("1");
+  await expect(dialog.locator("#create-count")).toHaveAttribute("min", "1");
+  await expect(dialog.getByText("1 or more sandboxes", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Create cluster" })).toBeVisible();
+
+  await modeSwitch.getByText("Sandbox", { exact: true }).click();
+  await expect(dialog.locator("#create-count")).toHaveCount(0);
+});
+
+test("P05 loads shared clusters and removes grouping without destroying sandboxes", async ({
+  page,
+}) => {
+  const list = [
+    record("cluster-member-one", "ready", "/work/shared"),
+    record("cluster-member-two", "ready", "/work/shared"),
+    record("individual", "ready", "/work/individual"),
+  ];
+  const cluster: SandboxClusterRecord = {
+    id: "cluster-shared",
+    memberIds: ["cluster-member-one", "cluster-member-two"],
+    workspaceRoot: "/work/shared",
+    createdAt: "2026-07-18T00:00:00.000Z",
+  };
+  await openFleet(page, { list, clusters: [cluster] }, "?view=cluster");
+
+  const clusterCard = page.locator('[data-sandbox-cluster-id="cluster-shared"]');
+  await expect(clusterCard).toBeVisible();
+  await expect(clusterCard.locator("[data-fleet-card]")).toHaveCount(2);
+
+  const viewSwitcher = page.locator("[data-sandbox-view-switcher]");
+  const sandboxView = viewSwitcher.getByRole("button", {
+    name: "Sandbox",
+    exact: true,
+  });
+  const clusterView = viewSwitcher.getByRole("button", {
+    name: "Cluster",
+    exact: true,
+  });
+  await expect(sandboxView).toContainText("3");
+  await expect(clusterView).toContainText("1");
+  await sandboxView.click();
+  await expect(page.locator("[data-fleet-card]")).toHaveCount(3);
+  const clusterLink = card(page, "cluster-member-one").getByRole("link", {
+    name: "View cluster cluster-shared",
+  });
+  await expect(clusterLink).toHaveText("cluster-shared");
+  await expect(card(page, "cluster-member-two").locator("[data-cluster-membership]")).toHaveText(
+    "cluster-shared",
+  );
+  await expect(card(page, "individual").locator("[data-cluster-membership]")).toHaveCount(0);
+  await clusterLink.click();
+  expect(new URL(page.url()).searchParams.get("view")).toBe("cluster");
+  expect(new URL(page.url()).searchParams.get("q")).toBe("cluster-shared");
+  await expect(clusterCard).toBeVisible();
+  await page.getByRole("textbox", { name: "Search sandboxes" }).fill("");
+  expect(new URL(page.url()).searchParams.get("q")).toBeNull();
+  await clusterCard.getByRole("button", { name: "Remove cluster cluster-shared" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Remove sandbox cluster" });
+  await expect(dialog).toContainText("sandboxes stay running");
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+  await dialog.getByRole("button", { name: "Remove cluster", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(clusterCard).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("view")).toBe("cluster");
+  await expect(clusterView).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Sandbox", exact: true }).click();
+  await expect(page.locator("[data-fleet-card]")).toHaveCount(3);
+  await expect(card(page, "cluster-member-one")).toBeVisible();
+  await expect(card(page, "cluster-member-two")).toBeVisible();
+});
+
+test("P05 keeps the cluster view selected when removing a sandbox from it", async ({
+  page,
+}) => {
+  const sandboxId = "remove-from-cluster";
+  const cluster: SandboxClusterRecord = {
+    id: "cluster-removal-route",
+    memberIds: [sandboxId],
+    workspaceRoot: "/work/shared",
+    createdAt: "2026-07-18T00:00:00.000Z",
+  };
+  await openFleet(
+    page,
+    { list: [record(sandboxId, "stopped", "/work/shared")], clusters: [cluster] },
+    "?view=cluster",
+  );
+
+  await card(page, sandboxId)
+    .getByRole("button", { name: `Destroy ${sandboxId}` })
+    .click();
+  await expect(card(page, sandboxId)).toHaveCount(0);
+
+  expect(new URL(page.url()).searchParams.get("view")).toBe("cluster");
+  await expect(
+    page
+      .locator("[data-sandbox-view-switcher]")
+      .getByRole("button", { name: "Cluster", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
 for (const {
   width,
   height,
   cardColumns,
   metricColumns,
   headerHeight,
+  minCardHeight,
 } of requiredViewports) {
   test(`P05 uses ${cardColumns}/${metricColumns} responsive columns without overflow at ${width}x${height}`, async ({
     page,
@@ -503,7 +700,9 @@ for (const {
     expect(layout.headerPosition).toBe("fixed");
     expect(Math.abs(layout.mainBottom - height)).toBeLessThanOrEqual(1);
     expect(Math.abs(layout.boardBottom - height)).toBeLessThanOrEqual(1);
-    expect(cardBoxes.every((box) => box.width > 0 && box.height >= 300)).toBe(true);
+    expect(
+      cardBoxes.every((box) => box.width > 0 && box.height >= minCardHeight),
+    ).toBe(true);
     expect(
       [...cardBoxes, ...metricBoxes].every(
         (box) => box.x >= 0 && box.x + box.width <= width + 1,
@@ -511,8 +710,7 @@ for (const {
     ).toBe(true);
 
     const mascot = page.locator('img[src*="ephemeral-sandbox-mascot"]');
-    if (width < 768) await expect(mascot).toBeHidden();
-    else await expect(mascot).toBeVisible();
+    await expect(mascot).toBeVisible();
   });
 }
 
@@ -599,9 +797,10 @@ test("P05 empty and disconnected states remain explicit @visual", async ({ page 
   await expectMetric(page, "Ready", "0");
   await expectMetric(page, "Active Commands", "0");
   await expectMetric(page, "Avg Memory", "—");
+  await expect(page.locator("[data-create-sandbox-trigger]")).toHaveCount(1);
   await expect(
-    page.locator("[data-fleet-empty] [data-new-sandbox-trigger]"),
-  ).toHaveText("New Sandbox");
+    page.locator("[data-fleet-empty] [data-create-sandbox-trigger]"),
+  ).toHaveCount(0);
   await expect(page).toHaveScreenshot("p05-fleet-empty-375x812.png", {
     animations: "disabled",
   });
@@ -736,7 +935,7 @@ test("P05 Open and Inspect use keyboard activation and encoded detail routes", a
   );
 });
 
-test("P05 Destroy remains inert until typed confirmation and then refreshes Fleet", async ({
+test("P05 Destroy runs directly and then refreshes Fleet", async ({
   page,
 }) => {
   const sandboxId = "destroy-me";
@@ -754,20 +953,7 @@ test("P05 Destroy remains inert until typed confirmation and then refreshes Flee
   });
   await trigger.focus();
   await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Destroy sandbox" });
-  await expect(dialog).toBeVisible();
-  expect(destroyRequests).toHaveLength(0);
-
-  const confirmation = dialog.getByPlaceholder(sandboxId);
-  const destroy = dialog.getByRole("button", { name: "Destroy sandbox" });
-  await confirmation.fill("wrong-id");
-  await expect(destroy).toBeDisabled();
-  await confirmation.fill(sandboxId);
-  await expect(destroy).toBeEnabled();
-  await destroy.focus();
-  await page.keyboard.press("Enter");
-
-  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Destroy sandbox" })).toHaveCount(0);
   await expect(card(page, sandboxId)).toHaveCount(0);
   await expect(page.locator("[data-fleet-empty]")).toContainText("No sandboxes yet");
   expect(destroyRequests).toHaveLength(1);
@@ -852,7 +1038,7 @@ test("P05 WorkspacePicker searches virtually, preserves the create draft, and re
   await openFleet(page, { list: [record("picker-sandbox")] });
   await expect(page.locator("[data-fleet-card]")).toHaveCount(1);
 
-  await page.getByRole("button", { name: "New Sandbox" }).click();
+  await page.getByRole("button", { name: "Create sandbox" }).click();
   const createDialog = page.getByRole("dialog", { name: "Create sandbox" });
   await expect(createDialog).toBeVisible();
   const nameInput = createDialog.locator("#create-name");
@@ -908,7 +1094,7 @@ test("P12 keeps 10k WorkspacePicker filtering below the input-to-paint budget", 
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openFleet(page, { list: [record("performance-picker")] });
-  await page.getByRole("button", { name: "New Sandbox" }).click();
+  await page.getByRole("button", { name: "Create sandbox" }).click();
   const createDialog = page.getByRole("dialog", { name: "Create sandbox" });
   await createDialog.locator("#create-workspace_root").click();
   const picker = page.getByRole("dialog", { name: "Select workspace folder" });
@@ -929,7 +1115,7 @@ test("P05 creation and WorkspacePicker retain visible keyboard focus at 375x812 
   await openFleet(page, { list: [record("creation-sandbox")] });
   await expect(page.locator("[data-fleet-card]")).toHaveCount(1);
 
-  const createTrigger = page.getByRole("button", { name: "New Sandbox" });
+  const createTrigger = page.getByRole("button", { name: "Create sandbox" });
   await createTrigger.focus();
   await expect(createTrigger).toBeFocused();
   await page.keyboard.press("Enter");
@@ -969,13 +1155,10 @@ test("P05 Fleet and creation surfaces have no Axe violations @a11y", async ({ pa
   await card(page, "sandbox-03")
     .getByRole("button", { name: "Destroy sandbox-03" })
     .click();
-  const destroyDialog = page.getByRole("dialog", { name: "Destroy sandbox" });
-  await expect(destroyDialog).toBeVisible();
+  await expect(card(page, "sandbox-03")).toHaveCount(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await destroyDialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(destroyDialog).toBeHidden();
 
-  await page.getByRole("button", { name: "New Sandbox" }).click();
+  await page.getByRole("button", { name: "Create sandbox" }).click();
   await expect(page.getByRole("dialog", { name: "Create sandbox" })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

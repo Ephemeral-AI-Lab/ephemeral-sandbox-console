@@ -52,16 +52,16 @@ const neutral: MantineColorsTuple = [
 ];
 
 const eyeBlue: MantineColorsTuple = [
-  "#f0f7fb",
-  "#e0eef5",
-  "#c7dfea",
-  "#a1c3d7",
-  "#87aec4",
-  "#68889e",
-  "#527890",
-  "#3e6077",
-  "#25485e",
-  "#203746",
+  "#eef8fc",
+  "#d9eef7",
+  "#bee0ef",
+  "#94cbe0",
+  "#62afcf",
+  "#368fb7",
+  "#1f7fa7",
+  "#16749b",
+  "#105d7d",
+  "#0c465f",
 ];
 
 const success: MantineColorsTuple = [

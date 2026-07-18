@@ -285,6 +285,10 @@ pub async fn spawn_console_with_desktop_auth(
             gateway_auth_token: Some(TEST_AUTH_TOKEN.to_owned()),
         },
         assets_dir,
+        cluster_registry_path: std::env::temp_dir().join(format!(
+            "sandbox-console-clusters-{}.json",
+            uuid::Uuid::new_v4()
+        )),
         rpc_timeout,
         // Shipped defaults; tests that tune a timeout go through the config.
         health_probe_timeout: Duration::from_secs(2),

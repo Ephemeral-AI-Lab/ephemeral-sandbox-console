@@ -1,20 +1,20 @@
 .shell {
-  --app-shell-header-height: 44px !important;
+  --app-shell-header-height: 52px !important;
 }
 
 .shell[data-dashboard-shell] {
-  --app-shell-header-height: 80px !important;
+  --app-shell-header-height: 64px !important;
 }
 
 .header {
-  border-bottom: 1px solid rgb(137 108 88 / 24%);
-  box-shadow: 0 10px 30px rgb(39 31 28 / 7%);
+  border-bottom: 1px solid rgb(137 108 88 / 20%);
+  box-shadow: 0 4px 14px rgb(39 31 28 / 5%);
   color: var(--mantine-color-neutral-9);
 }
 
 .dashboardHeader {
-  background: rgb(255 250 245 / 90%);
-  backdrop-filter: blur(12px);
+  background: rgb(251 245 236 / 94%);
+  backdrop-filter: blur(14px);
 }
 
 .detailHeader {
@@ -24,26 +24,45 @@
 .headerInner {
   height: 100%;
   margin-inline: auto;
-  max-width: 1536px;
-  padding-inline: clamp(16px, 2.5vw, 40px);
+  max-width: 1440px;
+  padding-inline: clamp(16px, 2vw, 28px);
 }
 
 .brandLink {
+  align-items: center;
   color: var(--mantine-color-neutral-9);
+  display: inline-flex;
   flex: 0 1 auto;
+  gap: 9px;
   min-width: 0;
 }
 
+.brandMark {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 36px;
+  justify-content: center;
+  overflow: hidden;
+  width: 36px;
+}
+
+.brandMark img {
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
 .brandName {
-  font-size: clamp(0.94rem, 1.5vw, 1.14rem);
+  font-size: 1rem;
   letter-spacing: -0.025em;
   white-space: nowrap;
 }
 
 .consolePill {
   align-items: center;
-  background: rgb(242 233 222 / 80%);
-  border: 1px solid rgb(137 108 88 / 26%);
+  background: rgb(255 250 245 / 72%);
+  border: 1px solid rgb(137 108 88 / 22%);
   border-radius: 999px;
   color: #5f493c;
   display: inline-flex;
@@ -54,8 +73,8 @@
   gap: 7px;
   letter-spacing: 0.04em;
   line-height: 1;
-  min-height: 30px;
-  padding: 7px 10px;
+  min-height: 28px;
+  padding: 6px 9px;
   text-transform: uppercase;
 }
 
@@ -85,18 +104,8 @@
 
 .brandLink:focus-visible {
   border-radius: 4px;
-  outline: 2px solid #3e6077;
+  outline: 2px solid #16749b;
   outline-offset: 3px;
-}
-
-.header :global([data-new-sandbox-trigger]) {
-  box-shadow: 0 5px 14px rgb(62 96 119 / 18%);
-  flex: 0 0 auto;
-  min-height: 44px;
-}
-
-.header :global([data-new-label-short]) {
-  display: none;
 }
 
 .dashboardMain,
@@ -105,10 +114,6 @@
 }
 
 @media (max-width: 47.99em) {
-  .shell[data-dashboard-shell] {
-    --app-shell-header-height: 64px !important;
-  }
-
   .headerInner {
     gap: 8px;
     padding-inline: 12px;
@@ -121,20 +126,13 @@
 }
 
 @media (max-width: 26.24em) {
+  .brandMark {
+    height: 32px;
+    width: 32px;
+  }
+
   .brandName {
-    font-size: 0.9rem;
-  }
-
-  .header :global([data-new-label-full]) {
-    display: none;
-  }
-
-  .header :global([data-new-label-short]) {
-    display: inline;
-  }
-
-  .header :global([data-new-sandbox-trigger]) {
-    padding-inline: 10px;
+    font-size: 0.88rem;
   }
 }
 

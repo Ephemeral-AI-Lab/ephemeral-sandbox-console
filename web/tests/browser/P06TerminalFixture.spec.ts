@@ -261,11 +261,7 @@ test("P06 creates and safely destroys explicit workspace sessions", async ({ pag
   await sessionRail.getByText("workspace-alpha", { exact: true }).click();
   await expect(page.getByText("history: workspace-alpha")).toBeVisible();
   await sessionRail.getByRole("button", { name: "Destroy workspace session workspace-beta" }).click();
-  const destroyDialog = page.getByRole("dialog", { name: "Destroy workspace session" });
-  const confirm = destroyDialog.getByLabel("Type the workspace session ID to confirm");
-  await expect(destroyDialog.getByRole("button", { name: "Destroy session" })).toBeDisabled();
-  await confirm.fill("workspace-beta");
-  await destroyDialog.getByRole("button", { name: "Destroy session" }).click();
+  await expect(page.getByRole("dialog", { name: "Destroy workspace session" })).toHaveCount(0);
   await expect.poll(() => api.destroyedSessions).toEqual(["workspace-beta"]);
   await expect(page.getByText("Workspace session destroyed")).toBeVisible();
   await expect(page.getByText("history: workspace-alpha")).toBeVisible();

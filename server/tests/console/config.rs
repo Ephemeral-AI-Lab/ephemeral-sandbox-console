@@ -109,6 +109,7 @@ fn resolve_defaults_when_no_flag_env_or_yaml() {
         ConsoleConfigOverrides::default(),
         None,
         None,
+        None,
         ConsoleSection::default(),
         stub_gateway(),
     );
@@ -126,6 +127,7 @@ fn resolve_defaults_when_no_flag_env_or_yaml() {
 fn resolve_yaml_section_beats_defaults() {
     let config = ConsoleConfig::from_sources(
         ConsoleConfigOverrides::default(),
+        None,
         None,
         None,
         yaml_section(),
@@ -152,6 +154,7 @@ fn resolve_flag_beats_env_and_yaml() {
         overrides,
         Some("127.0.0.1:7993".to_owned()),
         None,
+        None,
         yaml_section(),
         stub_gateway(),
     );
@@ -165,6 +168,7 @@ fn resolve_env_bind_beats_yaml() {
     let config = ConsoleConfig::from_sources(
         ConsoleConfigOverrides::default(),
         Some("127.0.0.1:7993".to_owned()),
+        None,
         None,
         yaml_section(),
         stub_gateway(),
@@ -184,6 +188,7 @@ fn resolve_assets_flag_beats_env() {
         },
         None,
         Some(PathBuf::from("/tmp/env-assets")),
+        None,
         ConsoleSection::default(),
         stub_gateway(),
     );
@@ -193,6 +198,7 @@ fn resolve_assets_flag_beats_env() {
         ConsoleConfigOverrides::default(),
         None,
         Some(PathBuf::from("/tmp/env-assets")),
+        None,
         ConsoleSection::default(),
         stub_gateway(),
     );
