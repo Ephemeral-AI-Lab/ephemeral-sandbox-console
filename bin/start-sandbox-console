@@ -3,12 +3,13 @@ set -eu
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 repo_root=$(CDPATH= cd "$script_dir/.." && pwd)
-. "$script_dir/sandbox-gateway-token"
-
-sandbox_gateway_token_load
 
 if [ -z "${SANDBOX_CONSOLE_ASSETS:-}" ]; then
-    for candidate in "$repo_root/dist/console" "$repo_root/web/console/dist"; do
+    for candidate in \
+        "$repo_root/dist/console" \
+        "$repo_root/web/dist" \
+        "$repo_root/share/ephemeral-sandbox-console"
+    do
         if [ -f "$candidate/index.html" ]; then
             SANDBOX_CONSOLE_ASSETS=$candidate
             export SANDBOX_CONSOLE_ASSETS
@@ -17,9 +18,34 @@ if [ -z "${SANDBOX_CONSOLE_ASSETS:-}" ]; then
     done
 fi
 
-local_bin="$repo_root/target/debug/sandbox-console"
-if [ -x "$local_bin" ]; then
-    exec "$local_bin" "$@"
+if [ -n "${SANDBOX_CONSOLE_BIN:-}" ]; then
+    if [ ! -x "$SANDBOX_CONSOLE_BIN" ]; then
+        printf 'SANDBOX_CONSOLE_BIN is not executable: %s\n' "$SANDBOX_CONSOLE_BIN" >&2
+        exit 1
+    fi
+    exec "$SANDBOX_CONSOLE_BIN" "$@"
 fi
 
-exec cargo run --quiet --manifest-path "$repo_root/Cargo.toml" -p sandbox-console --bin sandbox-console -- "$@"
+target_dir=${CARGO_TARGET_DIR:-$repo_root/target}
+case "$target_dir" in
+    /*) ;;
+    *) target_dir=$repo_root/$target_dir ;;
+esac
+
+for candidate in \
+    "$script_dir/sandbox-console" \
+    "$target_dir/debug/sandbox-console" \
+    "$target_dir/release/sandbox-console"
+do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+
+if [ -f "$repo_root/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+    cd "$repo_root"
+    exec cargo run --locked --quiet -p sandbox-console --bin sandbox-console -- "$@"
+fi
+
+printf 'sandbox-console binary not found; set SANDBOX_CONSOLE_BIN to the installed binary\n' >&2
+exit 1

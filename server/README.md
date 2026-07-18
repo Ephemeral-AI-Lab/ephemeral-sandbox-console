@@ -1,73 +1,85 @@
-# sandbox-console
+# sandbox-console BFF
 
-The web console's HTTP server: one same-origin surface the browser talks to
-for the operations plane, app preview, manager-owned sandbox readiness, and the
-SPA assets.
-It is a **client peer** of the three `sandbox-cli` binaries, built on
-`sandbox_operation_client::GatewayClient`. Semantic operation declarations and
-routes come from the three enabled domains of `sandbox-operation-catalog`; the
-console owns only its HTTP/JSON projection.
+The Rust server presents one same-origin surface for browser operations, app
+previews, manager-owned readiness, file listing, and the production SPA. It is
+a client peer of the core CLI adapters and sends authenticated requests through
+`sandbox_operation_client::GatewayClient`.
 
-Boundary law: validate `/api/rpc` against public catalog routes only, never
-define operation vocabulary, never contact the daemon RPC endpoint directly,
-never expose the gateway auth token to the browser, and never depend on
-protocol, applications, CLI, or MCP.
+The server validates `/api/rpc` against public catalog routes. It does not
+define operation vocabulary, contact daemon RPC directly, expose the gateway
+token to the browser, or depend on core applications, protocol, CLI, or MCP
+implementations.
 
 ## Routes
 
 ```text
-POST /api/rpc                                  single-operation dispatch
-POST /api/rpc   (Accept: text/event-stream)    same, streaming _stream_logs as SSE
-GET  /api/catalog                              management+runtime+observability catalogs
+POST /api/rpc                                  one-shot operation dispatch
+POST /api/rpc (Accept: text/event-stream)      SSE streaming dispatch
+GET  /api/catalog                              public operation catalog
 GET  /api/sandboxes/<id>/health                manager-owned readiness lookup
-POST /api/sandboxes/<id>/files/list            daemon_http directory listing
-ANY  /s/<id>/shared/<port>/...                 preview proxy (prefix swap to /forward)
-ANY  /s/<id>/isolated=<ws-id>/<port>/...       preview proxy, isolated workspace
-GET  /*                                        SPA assets + client-route fallback
+POST /api/sandboxes/<id>/files/list            daemon HTTP directory listing
+ANY  /s/<id>/shared/<port>/...                 shared preview proxy
+ANY  /s/<id>/isolated=<ws-id>/<port>/...       isolated preview proxy
+GET  /*                                        SPA assets and route fallback
 ```
 
-Protocol errors return in the body with HTTP 200; transport failures map to
-400 (bad body) / 502 (gateway or daemon unreachable) / 504 (timeout).
-Preview requests stream bodies, tunnel WebSocket/HTTP upgrades, append
-`X-Forwarded-For`, and resolve `daemon_http` endpoints through a 3s cache.
+Protocol errors remain HTTP 200 responses. Invalid bodies return 400, upstream
+gateway or daemon failures return 502, and timeouts return 504. Preview HTTP and
+WebSocket requests retain the header, credential, redirect, service-worker,
+opaque-origin, CSP, permissions, referrer, and content-type protections tested
+beside this crate.
 
-## Running
+## Release use
 
-One-command bootstrap (gateway → SPA build → console, in token order):
+Package the SPA and build the BFF from the repository root:
 
 ```sh
-bin/start-sandbox-console-stack             # then open http://127.0.0.1:7880
-bin/start-sandbox-console-stack --skip-gateway   # keep the running gateway
+bin/package-console
+cargo build --locked --release -p sandbox-console --bin sandbox-console
 ```
 
-Or piece by piece:
+Run it without a core source checkout by supplying the gateway endpoint and
+token through environment variables:
 
 ```sh
-cargo run -p xtask -- package-console       # build SPA into dist/console
-bin/start-sandbox-console                   # reads ~/.ephemeral-sandbox/gateway.token
-# or explicitly:
-cargo run -p sandbox-console -- \
-  --bind 127.0.0.1:7880 \
-  --gateway-socket 127.0.0.1:7878 \
-  --gateway-auth-token TOKEN \
-  --assets dist/console
+SANDBOX_GATEWAY_SOCKET=127.0.0.1:7878 \
+SANDBOX_GATEWAY_AUTH_TOKEN=TOKEN \
+bin/start-sandbox-console --bind 127.0.0.1:7880
 ```
 
-The gateway creates that token once with private permissions and reuses it
-across restarts. All launchers resolve the path through
-`bin/sandbox-gateway-token`; set `SANDBOX_GATEWAY_TOKEN_FILE` when a service
-install needs a system-managed path.
+The equivalent flags are `--gateway-socket`, `--gateway-auth-token`, and
+`--assets`. The launcher detects `dist/console`, `web/dist`, and an installed
+`share/ephemeral-sandbox-console` asset tree. Set `SANDBOX_CONSOLE_BIN` and
+`SANDBOX_CONSOLE_ASSETS` when using a different release layout.
 
-Config discovery: `--config-yaml` outranks `SANDBOX_CONSOLE_CONFIG_YAML` when
-selecting an optional YAML `console` section. Console values use flag > env
-when one exists > YAML > default precedence; assets use `--assets` >
-`SANDBOX_CONSOLE_ASSETS` > the detected `dist/console` or `web/console/dist`
-directory. Gateway discovery is independent and uses
-`--gateway-socket`/`--gateway-auth-token` > `SANDBOX_GATEWAY_SOCKET`/
-`SANDBOX_GATEWAY_AUTH_TOKEN` > its defaults. The default console bind is
-`127.0.0.1:7880` and the default gateway is `127.0.0.1:7878`. Bind stays
-loopback in v0 — browser auth is out of scope, matching the gateway and
-`daemon_http` posture.
+## Local full stack
 
-SPA development: `cd web/console && npm run dev` proxies `/api` and `/s`
-to the running console.
+`bin/start-sandbox-console-stack` starts the gateway from the sibling
+`ephemeral-sandbox` checkout by default. Set `EPHEMERAL_SANDBOX_ROOT` when core
+is elsewhere:
+
+```sh
+EPHEMERAL_SANDBOX_ROOT=/path/to/ephemeral-sandbox \
+  bin/start-sandbox-console-stack
+```
+
+The local stack sources `bin/sandbox-gateway-token` from that core checkout
+after starting the gateway. The release launcher never requires that helper.
+With `--skip-gateway`, an explicit `SANDBOX_GATEWAY_AUTH_TOKEN` also removes the
+local stack's need for a core checkout.
+
+## Configuration
+
+`--config-yaml` outranks `SANDBOX_CONSOLE_CONFIG_YAML` when selecting an
+optional YAML `console` section. Console values use flag, environment, YAML,
+then default precedence. Assets use `--assets`, `SANDBOX_CONSOLE_ASSETS`, then
+detected packaged or development assets. Gateway discovery is independent and
+uses `--gateway-socket` and `--gateway-auth-token`, then
+`SANDBOX_GATEWAY_SOCKET` and `SANDBOX_GATEWAY_AUTH_TOKEN`, then its defaults.
+
+The default console bind is `127.0.0.1:7880` and the default gateway endpoint is
+`127.0.0.1:7878`. The default bind remains loopback because browser
+authentication is out of scope.
+
+For SPA development, run `npm run dev` in `web/`; Vite proxies `/api` and `/s`
+to the BFF.

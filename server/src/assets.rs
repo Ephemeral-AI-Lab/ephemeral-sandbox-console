@@ -15,7 +15,7 @@ const PLACEHOLDER_PAGE: &str = "<!doctype html>\
 <body style=\"font-family: system-ui; margin: 4rem auto; max-width: 40rem; color: #1a1d21;\">\
 <h1>EphemeralOS Console</h1>\
 <p>The console server is running, but the SPA assets are not built.</p>\
-<p>Build them with <code>cargo run -p xtask -- package-console</code>, then reload.</p>\
+<p>Build them with <code>bin/package-console</code>, then reload.</p>\
 </body></html>";
 
 pub async fn serve(assets_dir: Option<&Path>, uri_path: &str) -> Response<BoxBody> {

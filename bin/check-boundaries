@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+repo_root=$(CDPATH= cd "$script_dir/.." && pwd)
+manifest=$repo_root/Cargo.toml
+server_manifest=$repo_root/server/Cargo.toml
+core_url=https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git
+core_rev=25363d06d679edcde26839f5483ee7ca18e5c980
+
+for dependency in sandbox-config sandbox-operation-catalog sandbox-operation-client sandbox-operation-contract; do
+    line=$(grep "^$dependency = " "$manifest")
+    case "$line" in
+        *"git = \"$core_url\""*"rev = \"$core_rev\""*) ;;
+        *)
+            printf '%s must use the canonical core URL and revision\n' "$dependency" >&2
+            exit 1
+            ;;
+    esac
+done
+
+expected_catalog='sandbox-operation-catalog = { workspace = true, features = ["manager", "observability", "runtime"] }'
+grep -Fqx "$expected_catalog" "$server_manifest"
+
+if grep -Eq 'sandbox-(protocol|gateway|manager|daemon|runtime|cli|mcp)[[:space:]]*=' "$server_manifest"; then
+    printf 'server manifest contains a forbidden direct core dependency\n' >&2
+    exit 1
+fi
+
+if git -C "$repo_root" grep -En '(^|[^[:alnum:]_])sandbox_(protocol|gateway|manager|daemon|runtime|cli|mcp)([^[:alnum:]_]|$)' -- server/src; then
+    printf 'server source imports a forbidden core implementation crate\n' >&2
+    exit 1
+fi
+
+test "$(find "$repo_root/server/src" -maxdepth 1 -name main.rs -print | wc -l | tr -d ' ')" = 1
+git -C "$repo_root" grep -Fq 'unknown_operation_is_rejected_before_gateway_transport' -- server/tests
+git -C "$repo_root" grep -Fq 'internal_operation_is_rejected_before_gateway_transport' -- server/tests
+

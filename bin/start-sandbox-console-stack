@@ -1,11 +1,4 @@
 #!/bin/sh
-# Bootstrap the whole web console stack in dependency order:
-#   1. sandbox gateway (Docker backend; repackages the daemon when sources changed)
-#   2. SPA assets (xtask package-console, skipped when dist/console is fresh)
-#   3. sandbox-console server (background, with the gateway's current auth token)
-#
-# The console reads the gateway auth token at startup, so it is always
-# (re)started after the gateway here.
 set -eu
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
@@ -17,14 +10,47 @@ pid_file=${SANDBOX_CONSOLE_PID_FILE:-/tmp/eos-console.pid}
 log_file=${SANDBOX_CONSOLE_LOG:-/tmp/eos-console.log}
 skip_gateway=0
 skip_spa=0
-gateway_args=""
+gateway_args=
+core_root=
 
 usage() {
     printf 'start-sandbox-console-stack [--skip-gateway] [--skip-spa] [--bind HOST:PORT] [--rebuild-binary]\n\n'
     printf '  --skip-gateway    do not (re)start the gateway; keep the running one\n'
     printf '  --skip-spa        do not rebuild the SPA even if sources changed\n'
     printf '  --bind HOST:PORT  console bind address (default %s)\n' "$bind"
-    printf '  --rebuild-binary  forwarded to start-sandbox-docker-gateway\n'
+    printf '  --rebuild-binary  forwarded to the core Docker gateway launcher\n'
+    printf '\nSet EPHEMERAL_SANDBOX_ROOT to the core checkout; the sibling checkout is the default.\n'
+}
+
+resolve_core_root() {
+    if [ -n "$core_root" ]; then
+        return
+    fi
+    core_candidate=${EPHEMERAL_SANDBOX_ROOT:-$repo_root/../ephemeral-sandbox}
+    if ! core_root=$(CDPATH= cd "$core_candidate" 2>/dev/null && pwd); then
+        printf 'Ephemeral Sandbox checkout not found at %s; set EPHEMERAL_SANDBOX_ROOT\n' \
+            "$core_candidate" >&2
+        exit 1
+    fi
+}
+
+load_gateway_token() {
+    if [ -n "${SANDBOX_GATEWAY_AUTH_TOKEN:-}" ]; then
+        return
+    fi
+    resolve_core_root
+    token_helper=$core_root/bin/sandbox-gateway-token
+    if [ ! -f "$token_helper" ]; then
+        printf 'gateway token helper not found at %s; set SANDBOX_GATEWAY_AUTH_TOKEN\n' \
+            "$token_helper" >&2
+        exit 1
+    fi
+    . "$token_helper"
+    sandbox_gateway_token_load
+    if [ -z "${SANDBOX_GATEWAY_AUTH_TOKEN:-}" ]; then
+        printf 'gateway auth token is unavailable; set SANDBOX_GATEWAY_AUTH_TOKEN\n' >&2
+        exit 1
+    fi
 }
 
 while [ $# -gt 0 ]; do
@@ -33,31 +59,43 @@ while [ $# -gt 0 ]; do
         --skip-spa) skip_spa=1 ;;
         --bind)
             shift
-            [ $# -gt 0 ] || { printf -- '--bind requires a value\n' >&2; exit 2; }
+            if [ $# -eq 0 ]; then
+                printf '%s\n' '--bind requires a value' >&2
+                exit 2
+            fi
             bind=$1
             ;;
         --bind=*) bind=${1#--bind=} ;;
-        --rebuild-binary) gateway_args="--rebuild-binary" ;;
+        --rebuild-binary) gateway_args=--rebuild-binary ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'unknown option %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
     esac
     shift
 done
 
-# ---- 1. gateway -----------------------------------------------------------
 if [ "$skip_gateway" -eq 0 ]; then
+    resolve_core_root
+    gateway_launcher=$core_root/bin/start-sandbox-docker-gateway
+    if [ ! -x "$gateway_launcher" ]; then
+        printf 'core Docker gateway launcher is not executable: %s\n' "$gateway_launcher" >&2
+        exit 1
+    fi
     if ! docker info >/dev/null 2>&1; then
         printf 'docker daemon is not reachable; start Docker first (or pass --skip-gateway)\n' >&2
         exit 1
     fi
-    printf '==> starting sandbox gateway\n'
-    # shellcheck disable=SC2086
-    "$repo_root/bin/start-sandbox-docker-gateway" $gateway_args
+    printf '==> starting sandbox gateway from %s\n' "$core_root"
+    if [ -n "$gateway_args" ]; then
+        "$gateway_launcher" "$gateway_args"
+    else
+        "$gateway_launcher"
+    fi
 else
     printf '==> keeping the running gateway (--skip-gateway)\n'
 fi
 
-# ---- 2. SPA assets --------------------------------------------------------
+load_gateway_token
+
 spa_index=$repo_root/dist/console/index.html
 if [ "$skip_spa" -eq 1 ]; then
     printf '==> keeping existing SPA assets (--skip-spa)\n'
@@ -68,25 +106,31 @@ else
     else
         newer_spa_source=$(
             find \
-                "$repo_root/web/console/src" \
-                "$repo_root/web/console/package.json" \
-                "$repo_root/web/console/vite.config.ts" \
-                "$repo_root/web/console/index.html" \
+                "$repo_root/web/src" \
+                "$repo_root/web/public" \
+                "$repo_root/web/package.json" \
+                "$repo_root/web/package-lock.json" \
+                "$repo_root/web/vite.config.ts" \
+                "$repo_root/web/tsconfig.app.json" \
+                "$repo_root/web/tsconfig.json" \
+                "$repo_root/web/tsconfig.node.json" \
+                "$repo_root/web/index.html" \
                 -type f -newer "$spa_index" -print -quit 2>/dev/null
         )
-        [ -z "$newer_spa_source" ] || needs_spa=1
+        if [ -n "$newer_spa_source" ]; then
+            needs_spa=1
+        fi
     fi
     if [ "$needs_spa" -eq 1 ]; then
-        printf '==> building SPA assets (xtask package-console)\n'
-        (cd "$repo_root" && cargo run -p xtask -- package-console)
+        printf '==> building SPA assets\n'
+        "$repo_root/bin/package-console"
     else
         printf '==> SPA assets are up to date (dist/console)\n'
     fi
 fi
 
-# ---- 3. console server ----------------------------------------------------
 printf '==> building sandbox-console\n'
-cargo build --quiet --manifest-path "$repo_root/Cargo.toml" -p sandbox-console --bin sandbox-console
+(cd "$repo_root" && cargo build --locked --quiet -p sandbox-console --bin sandbox-console)
 
 stop_existing_console() {
     [ -f "$pid_file" ] || return 0
@@ -102,7 +146,8 @@ stop_existing_console() {
     case "$process_name" in
         *sandbox-console*) ;;
         *)
-            printf 'stale pid file %s points at non-console process %s; not killing\n' "$pid_file" "$old_pid" >&2
+            printf 'stale pid file %s points at non-console process %s; not killing\n' \
+                "$pid_file" "$old_pid" >&2
             rm -f "$pid_file"
             return 0
             ;;
@@ -114,28 +159,31 @@ stop_existing_console() {
         sleep 0.1
         count=$((count + 1))
     done
-    kill -0 "$old_pid" 2>/dev/null && kill -KILL "$old_pid" 2>/dev/null
+    if kill -0 "$old_pid" 2>/dev/null; then
+        kill -KILL "$old_pid" 2>/dev/null || true
+    fi
     rm -f "$pid_file"
 }
 
 stop_existing_console
 
-# Also stop a console holding the bind port without a pid file (e.g. one
-# started by hand via start-sandbox-console).
 console_port=${bind##*:}
 port_pids=$(lsof -tiTCP:"$console_port" -sTCP:LISTEN 2>/dev/null || true)
 for port_pid in $port_pids; do
     process_name=$(ps -p "$port_pid" -o comm= 2>/dev/null || true)
     case "$process_name" in
         *sandbox-console*)
-            printf '==> stopping sandbox-console pid %s holding port %s\n' "$port_pid" "$console_port"
+            printf '==> stopping sandbox-console pid %s holding port %s\n' \
+                "$port_pid" "$console_port"
             kill "$port_pid" 2>/dev/null || true
             count=0
             while kill -0 "$port_pid" 2>/dev/null && [ "$count" -lt 30 ]; do
                 sleep 0.1
                 count=$((count + 1))
             done
-            kill -0 "$port_pid" 2>/dev/null && kill -KILL "$port_pid" 2>/dev/null
+            if kill -0 "$port_pid" 2>/dev/null; then
+                kill -KILL "$port_pid" 2>/dev/null || true
+            fi
             ;;
         *)
             printf 'port %s is held by non-console process %s (%s); refusing to start\n' \
@@ -165,7 +213,8 @@ print(process.pid)
 PY
     )
 else
-    nohup "$repo_root/bin/start-sandbox-console" --bind "$bind" </dev/null >>"$log_file" 2>&1 &
+    nohup "$repo_root/bin/start-sandbox-console" --bind "$bind" \
+        </dev/null >>"$log_file" 2>&1 &
     console_pid=$!
 fi
 printf '%s\n' "$console_pid" >"$pid_file"
@@ -178,7 +227,8 @@ until curl -sf -o /dev/null "http://$bind/api/catalog" 2>/dev/null; do
         exit 1
     fi
     if [ "$count" -ge 100 ]; then
-        printf 'sandbox-console did not answer on %s within 10s; see log: %s\n' "$bind" "$log_file" >&2
+        printf 'sandbox-console did not answer on %s within 10s; see log: %s\n' \
+            "$bind" "$log_file" >&2
         exit 1
     fi
     sleep 0.1
@@ -186,7 +236,8 @@ until curl -sf -o /dev/null "http://$bind/api/catalog" 2>/dev/null; do
 done
 
 if ! kill -0 "$console_pid" 2>/dev/null; then
-    printf 'something else answered on %s but the new sandbox-console died; see log: %s\n' "$bind" "$log_file" >&2
+    printf 'something else answered on %s but the new sandbox-console died; see log: %s\n' \
+        "$bind" "$log_file" >&2
     tail -20 "$log_file" >&2 2>/dev/null || true
     exit 1
 fi

@@ -50,7 +50,7 @@ test("P08 Preview keeps proxy failures inside the opaque frame @visual", async (
   await expect(page).toHaveScreenshot("p08-preview-error-1440x900.png", { animations: "disabled" });
 });
 
-test("P08 Preview keeps an opaque frame boundary while preserving selected capabilities", async ({ page }) => {
+test("P08 Preview keeps an opaque frame boundary while preserving selected capabilities @security", async ({ page }) => {
   let opaqueApiOrigin: string | undefined;
   await page.route(`**${previewPrefix}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;

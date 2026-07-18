@@ -3,11 +3,6 @@ use serde_json::Value;
 
 use crate::support;
 
-const COMPATIBILITY_CATALOG: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../sandbox-cli/tests/fixtures/compatibility-catalog.json"
-));
-
 fn operation_names(catalog: &Value) -> Vec<String> {
     let mut names = catalog["operations"]
         .as_array()
@@ -28,57 +23,6 @@ fn names(values: &[&str]) -> Vec<String> {
     names
 }
 
-fn remove_cli_fields(value: &mut Value) {
-    match value {
-        Value::Array(values) => values.iter_mut().for_each(remove_cli_fields),
-        Value::Object(object) => {
-            object.remove("cli");
-            object.values_mut().for_each(remove_cli_fields);
-        }
-        _ => {}
-    }
-}
-
-fn remove_routes(value: &mut Value) {
-    for catalog in ["management", "runtime", "observability"] {
-        value[catalog]
-            .as_object_mut()
-            .expect("catalog object")
-            .remove("routes");
-    }
-}
-
-fn assert_compatibility_operations_preserved(current: &Value, compatibility: &Value) {
-    for catalog in ["management", "runtime", "observability"] {
-        assert_eq!(
-            current[catalog]["operation_execution_space"],
-            compatibility[catalog]["operation_execution_space"],
-            "{catalog} execution space"
-        );
-        assert_eq!(
-            current[catalog]["families"], compatibility[catalog]["families"],
-            "{catalog} families"
-        );
-        let current_operations = current[catalog]["operations"]
-            .as_array()
-            .expect("current operations");
-        for expected in compatibility[catalog]["operations"]
-            .as_array()
-            .expect("Phase 0 operations")
-        {
-            let name = expected["name"].as_str().expect("operation name");
-            let actual = current_operations
-                .iter()
-                .find(|operation| operation["name"] == name)
-                .unwrap_or_else(|| panic!("missing compatibility operation: {catalog}.{name}"));
-            assert_eq!(
-                actual, expected,
-                "{catalog}.{name} changed from compatibility baseline"
-            );
-        }
-    }
-}
-
 #[tokio::test]
 async fn catalog_returns_all_three_execution_spaces() {
     let gateway = support::FakeGateway::spawn(|_| Vec::new()).await;
@@ -87,13 +31,6 @@ async fn catalog_returns_all_three_execution_spaces() {
     let response = support::get(console, "/api/catalog").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = support::body_json(response).await;
-
-    let mut compatibility: Value =
-        serde_json::from_str(COMPATIBILITY_CATALOG).expect("compatibility catalog fixture");
-    remove_cli_fields(&mut compatibility);
-    let mut current_semantics = body.clone();
-    remove_routes(&mut current_semantics);
-    assert_compatibility_operations_preserved(&current_semantics, &compatibility);
 
     let mut keys = body
         .as_object()
@@ -120,6 +57,8 @@ async fn catalog_returns_all_three_execution_spaces() {
     assert_eq!(
         operation_names(&body["runtime"]),
         names(&[
+            "create_workspace_session",
+            "destroy_workspace_session",
             "exec_command",
             "write_command_stdin",
             "read_command_lines",

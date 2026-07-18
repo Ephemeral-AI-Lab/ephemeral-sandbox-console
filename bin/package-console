@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+repo_root=$(CDPATH= cd "$script_dir/.." && pwd)
+web_root=$repo_root/web
+built_assets=$web_root/dist
+dist_root=$repo_root/dist
+packaged_assets=$dist_root/console
+
+for command_name in node npm; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        printf '%s is required to package the console\n' "$command_name" >&2
+        exit 1
+    fi
+done
+
+node_major=$(node -p 'process.versions.node.split(".")[0]')
+if [ "$node_major" != 24 ]; then
+    printf 'Node.js 24 is required; found %s\n' "$(node --version)" >&2
+    exit 1
+fi
+
+(cd "$web_root" && npm ci --no-fund --no-audit && npm run build)
+
+if [ ! -f "$built_assets/index.html" ]; then
+    printf 'SPA build produced no index.html in %s\n' "$built_assets" >&2
+    exit 1
+fi
+
+mkdir -p "$dist_root"
+stage_root=$(mktemp -d "$dist_root/.console-package.XXXXXX")
+new_assets=$stage_root/new
+previous_assets=$stage_root/previous
+
+cleanup() {
+    status=$?
+    if [ ! -e "$packaged_assets" ] && [ -e "$previous_assets" ]; then
+        mv "$previous_assets" "$packaged_assets" 2>/dev/null || true
+    fi
+    rm -rf "$stage_root"
+    trap - 0 1 2 3 15
+    exit "$status"
+}
+trap cleanup 0 1 2 3 15
+
+mkdir "$new_assets"
+cp -R "$built_assets"/. "$new_assets"/
+
+if [ -e "$packaged_assets" ]; then
+    mv "$packaged_assets" "$previous_assets"
+fi
+mv "$new_assets" "$packaged_assets"
+
+printf 'packaged console SPA into %s\n' "$packaged_assets"
+
