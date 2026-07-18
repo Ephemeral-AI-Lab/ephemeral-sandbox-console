@@ -2,6 +2,7 @@ import {
   Alert,
   Badge,
   Box,
+  Button,
   Code,
   Group,
   Paper,
@@ -11,7 +12,6 @@ import {
   Text,
 } from "@mantine/core";
 import {
-  fetchCgroup,
   type WorkspaceProcess,
   type WorkspaceProcesses,
   type WorkspaceProcessTopology,
@@ -22,18 +22,15 @@ import {
   estimateWorkspaceResources,
   type WorkspaceResourceEstimate,
 } from "@/pages/sandbox/observability/processEstimates";
-import { usePoll } from "@/poll/usePoll";
+import {
+  topologyHasActivity,
+  useProcessTopology,
+} from "@/poll/useProcessTopology";
 import { useEffect, useRef, useState } from "react";
 
-const TOPOLOGY_WINDOW_MS = 60_000;
-
 export function CgroupView() {
-  const { sandboxId } = useSandbox();
-  const result = usePoll({
-    key: ["observability", sandboxId, "cgroup", "topology"],
-    fn: (signal) => fetchCgroup(sandboxId, "sandbox", TOPOLOGY_WINDOW_MS, signal),
-    mode: "slow",
-  });
+  const { sandboxId, record, recordUpdatedAt } = useSandbox();
+  const result = useProcessTopology(sandboxId, record, recordUpdatedAt);
   const previousRef = useRef<{
     sandboxId: string;
     topology: WorkspaceProcessTopology;
@@ -63,7 +60,7 @@ export function CgroupView() {
     <Stack gap="md" p="md" data-process-topology>
       {result.isError ? (
         <Alert color="red" role="alert" title={result.data ? "Process topology refresh failed" : "Process topology unavailable"}>
-          {result.error.message} — retrying automatically.
+          {result.error.message} — refresh directly or wait for new manager activity.
         </Alert>
       ) : null}
 
@@ -71,6 +68,9 @@ export function CgroupView() {
         topology={result.data?.topology}
         pending={result.data === undefined && !result.isError}
         estimates={estimates}
+        canRefresh={result.canRefresh}
+        refreshing={result.isFetching}
+        onRefresh={() => void result.refresh()}
       />
     </Stack>
   );
@@ -80,10 +80,16 @@ function ProcessTopologyPanel({
   topology,
   pending,
   estimates,
+  canRefresh,
+  refreshing,
+  onRefresh,
 }: {
   topology?: WorkspaceProcessTopology;
   pending: boolean;
   estimates: Record<string, WorkspaceResourceEstimate>;
+  canRefresh: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
   return (
     <Paper withBorder p="md" component="section" aria-labelledby="process-topology-title">
@@ -97,10 +103,24 @@ function ProcessTopologyPanel({
           </Text>
         </Box>
         <Stack gap={2} align="flex-end">
-          <Badge color={topology?.available ? "success" : pending ? "neutral" : "yellow"} variant="light">
-            {topology?.available ? formatSource(topology.source) : pending ? "loading" : "unavailable"}
-          </Badge>
-          <Text size="xs" c="dimmed">auto-refresh</Text>
+          <Group gap="xs">
+            <Badge color={topology?.available ? "success" : pending ? "neutral" : "yellow"} variant="light">
+              {topology?.available ? formatSource(topology.source) : pending ? "loading" : "unavailable"}
+            </Badge>
+            <Button
+              aria-label="Refresh process topology"
+              disabled={!canRefresh}
+              loading={refreshing}
+              onClick={onRefresh}
+              size="compact-xs"
+              variant="subtle"
+            >
+              Refresh
+            </Button>
+          </Group>
+          <Text size="xs" c="dimmed">
+            {topologyHasActivity(topology) ? "auto-refresh active" : "refreshes on activity"}
+          </Text>
         </Stack>
       </Group>
 
@@ -110,7 +130,7 @@ function ProcessTopologyPanel({
         <AvailableTopology topology={topology} estimates={estimates} />
       ) : (
         <Alert color="red" mt="md" role="alert" title="Process topology unavailable">
-          {topology?.error ?? "Topology was not reported by this daemon."} The view will retry automatically.
+          {topology?.error ?? "Topology was not reported by this daemon."} Refresh directly or wait for new manager activity.
         </Alert>
       )}
     </Paper>

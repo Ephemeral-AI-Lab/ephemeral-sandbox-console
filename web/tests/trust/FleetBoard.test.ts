@@ -43,6 +43,7 @@ const activeSnapshot: SnapshotResult = {
         {
           workspace_id: "workspace-current",
           lifecycle_state: "running",
+          finalization_state: "active",
           network_profile: "shared",
           layers: { base_root_hash: "root", layer_count: 0 },
           namespace_fd_count: 0,

@@ -59,6 +59,7 @@ async fn catalog_returns_all_three_execution_spaces() {
         names(&[
             "create_workspace_session",
             "destroy_workspace_session",
+            "publish_workspace_session",
             "exec_command",
             "write_command_stdin",
             "read_command_lines",
@@ -70,7 +71,15 @@ async fn catalog_returns_all_three_execution_spaces() {
     );
     assert_eq!(
         operation_names(&body["observability"]),
-        names(&["snapshot", "trace", "events", "cgroup", "layerstack"])
+        names(&[
+            "snapshot",
+            "trace",
+            "events",
+            "cgroup",
+            "layerstack",
+            "resources",
+            "topology",
+        ])
     );
     let file_edit = body["runtime"]["operations"]
         .as_array()

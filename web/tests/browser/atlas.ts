@@ -47,6 +47,7 @@ const snapshot = {
         {
           workspace_id: "workspace-fixture",
           lifecycle_state: "running",
+          finalization_state: "active",
           network_profile: "shared",
           layers: { base_root_hash: "fixture-base-root-hash", layer_count: 3 },
           namespace_fd_count: 5,
@@ -125,8 +126,35 @@ export async function installAtlasApi(page: Page) {
       case "snapshot":
         body = scope.kind === "sandbox" ? snapshot.sandboxes[0] : snapshot;
         break;
+      case "resources":
+        body = scope.kind === "system"
+          ? {
+              view: "resources",
+              scope: "fleet",
+              availability: "available",
+              errors: [],
+              sandboxes: {
+                [record.id]: {
+                  availability: "available",
+                  errors: [],
+                  current: samples.at(-1) ?? null,
+                },
+              },
+            }
+          : {
+              view: "resources",
+              scope: "sandbox",
+              sandbox_id: record.id,
+              availability: "available",
+              errors: [],
+              series: samples,
+            };
+        break;
       case "cgroup":
         body = { view: "cgroup", scope: String(args.scope ?? "sandbox"), series: samples, topology };
+        break;
+      case "topology":
+        body = { view: "topology", scope: "sandbox", topology };
         break;
       case "events":
         body = events;

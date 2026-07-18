@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Box, MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
@@ -16,6 +16,15 @@ const sandboxId = "terminal-fixture";
 const fixtureParams = new URL(window.location.href).searchParams;
 const large = fixtureParams.has("large");
 const external = fixtureParams.has("external");
+const cleanup = fixtureParams.has("cleanup");
+const idle = fixtureParams.has("idle");
+const missing = fixtureParams.has("missing");
+
+type SessionFixtureDetail =
+  | { action: "remove"; workspaceSessionId: string }
+  | { action: "active"; workspaceSessionId: string }
+  | { action: "finalizing"; workspaceSessionId: string }
+  | { action: "finalize-failed"; workspaceSessionId: string };
 
 const snapshot: SnapshotResult = {
   sandboxes: [
@@ -31,11 +40,12 @@ const snapshot: SnapshotResult = {
         {
           workspace_id: "workspace-alpha",
           lifecycle_state: "running",
+          finalization_state: "active",
           network_profile: "shared",
           layers: { base_root_hash: "fixture-base", layer_count: 2 },
           namespace_fd_count: 2,
           resources: { latest: null, history: [] },
-          active_namespace_executions: [
+          active_namespace_executions: idle ? [] : [
             {
               namespace_execution_id: large ? "large-command" : "running-command",
               operation: "exec_command",
@@ -47,6 +57,7 @@ const snapshot: SnapshotResult = {
         {
           workspace_id: "workspace-beta",
           lifecycle_state: "running",
+          finalization_state: cleanup ? "finalize_failed" : "active",
           network_profile: "isolated",
           layers: { base_root_hash: "fixture-base", layer_count: 4 },
           namespace_fd_count: 1,
@@ -120,13 +131,13 @@ const entries: LedgerEntry[] = external
 
 localStorage.setItem(`eos-console:ledger:${sandboxId}`, JSON.stringify(entries));
 
-function TerminalContext() {
+function TerminalContext({ value }: { value: SnapshotResult }) {
   return (
     <Outlet
       context={{
         sandboxId,
         record: null,
-        snapshot,
+        snapshot: value,
         recordError: null,
       }}
     />
@@ -139,17 +150,52 @@ function Fixture() {
     [],
   );
   const commandSessionId = large ? "large-command" : "running-command";
+  const [fixtureSnapshot, setFixtureSnapshot] = useState(snapshot);
+
+  useEffect(() => {
+    const updateSession = (event: Event) => {
+      const detail = (event as CustomEvent<SessionFixtureDetail>).detail;
+      setFixtureSnapshot((current) => ({
+        sandboxes: current.sandboxes.map((sandbox) => ({
+          ...sandbox,
+          workspaces: detail.action === "remove"
+            ? sandbox.workspaces.filter(
+                (workspace) => workspace.workspace_id !== detail.workspaceSessionId,
+              )
+            : sandbox.workspaces.map((workspace) =>
+                workspace.workspace_id === detail.workspaceSessionId
+                  ? {
+                      ...workspace,
+                      finalization_state: detail.action,
+                      active_namespace_executions: [],
+                    }
+                  : workspace,
+              ),
+        })),
+      }));
+    };
+    window.addEventListener("p06-session-fixture", updateSession);
+    return () => window.removeEventListener("p06-session-fixture", updateSession);
+  }, []);
 
   return (
     <MantineProvider forceColorScheme="light" theme={ephemeralSandboxTheme}>
       <Notifications limit={4} position="bottom-right" />
       <QueryClientProvider client={queryClient}>
         <MemoryRouter
-          initialEntries={[external ? "/terminal?session=workspace-alpha" : `/terminal#cmd-${commandSessionId}`]}
+          initialEntries={[
+            cleanup
+              ? "/terminal?session=workspace-beta"
+              : external
+                ? "/terminal?session=workspace-alpha"
+                : missing
+                  ? "/terminal?session=workspace-gone"
+                  : `/terminal#cmd-${commandSessionId}`,
+          ]}
         >
           <Box component="main" h="100%">
             <Routes>
-              <Route path="/terminal" element={<TerminalContext />}>
+              <Route path="/terminal" element={<TerminalContext value={fixtureSnapshot} />}>
                 <Route index element={<TerminalTab />} />
               </Route>
             </Routes>

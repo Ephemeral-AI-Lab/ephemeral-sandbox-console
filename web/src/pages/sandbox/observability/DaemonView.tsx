@@ -14,7 +14,11 @@ import {
 } from "@mantine/core";
 import { Download, Pause, Play, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { fetchCgroup, type WorkspaceProcessTopology } from "@/api/observability";
+import {
+  fetchSandboxResources,
+  fetchTopology,
+  type WorkspaceProcessTopology,
+} from "@/api/observability";
 import { DAEMON_HISTORY_LIMIT, type DaemonMetricPoint } from "@/core/daemonMetrics";
 import { formatBytes, formatTimestamp } from "@/lib/format";
 import { useSandbox } from "@/pages/sandbox/SandboxContext";
@@ -44,8 +48,14 @@ export function DaemonView() {
     readFullCapture,
   } = useDaemonCapture(sandboxId);
   const result = usePoll({
-    key: ["observability", sandboxId, "cgroup", "daemon", cadence],
-    fn: (signal) => fetchCgroup(sandboxId, "sandbox", TOPOLOGY_WINDOW_MS, signal),
+    key: ["observability", sandboxId, "daemon-diagnostic", cadence],
+    fn: async (signal) => {
+      const [topology, resources] = await Promise.all([
+        fetchTopology(sandboxId, signal),
+        fetchSandboxResources(sandboxId, TOPOLOGY_WINDOW_MS, signal),
+      ]);
+      return { topology: topology.topology, series: resources.series };
+    },
     mode: cadence === "close" ? "fast" : "slow",
     enabled: capturing && storageReady && storageError === null,
   });

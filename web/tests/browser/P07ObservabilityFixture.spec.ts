@@ -141,6 +141,7 @@ async function installObservabilityApi(
   let eventsCalls = 0;
   let cgroupFail = false;
   let cgroupCalls = 0;
+  let topologyCalls = 0;
   let currentTopology = topology;
   await page.route("**/api/rpc", async (route) => {
     const { op, args } = route.request().postDataJSON() as { op: string; args: Record<string, unknown> };
@@ -155,6 +156,27 @@ async function installObservabilityApi(
     }
     if (op === "trace") {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(fixtureTrace) });
+      return;
+    }
+    if (op === "resources") {
+      cgroupCalls += 1;
+      if (cgroupFail) {
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { kind: "fixture_error", message: "resource refresh unavailable" } }) });
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          view: "resources",
+          scope: "sandbox",
+          sandbox_id: "sandbox-fixture",
+          availability: "available",
+          errors: [],
+          series: daemonCapture
+            ? samples.map((sample) => ({ ...sample, metrics: { ...sample.metrics, mem_cur: 74_000_000 } }))
+            : samples,
+        }),
+      });
       return;
     }
     if (op === "cgroup") {
@@ -187,6 +209,35 @@ async function installObservabilityApi(
                   },
                 },
           } : {}),
+        }),
+      });
+      return;
+    }
+    if (op === "topology") {
+      topologyCalls += 1;
+      if (cgroupFail) {
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { kind: "fixture_error", message: "topology refresh unavailable" } }) });
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          view: "topology",
+          scope: "sandbox",
+          topology: currentTopology.daemon === undefined || currentTopology.daemon === null
+            ? currentTopology
+            : {
+                ...currentTopology,
+                daemon: {
+                  ...currentTopology.daemon,
+                  sampled_at_unix_ms: NOW + topologyCalls * 400,
+                  cpu_time_us: (currentTopology.daemon.cpu_time_us ?? 0) + topologyCalls * 24_000,
+                  io_read_bytes: (currentTopology.daemon.io_read_bytes ?? 0) + topologyCalls * 16_384,
+                  io_write_bytes: (currentTopology.daemon.io_write_bytes ?? 0) + topologyCalls * 8_192,
+                  voluntary_context_switches: (currentTopology.daemon.voluntary_context_switches ?? 0) + topologyCalls * 12,
+                  involuntary_context_switches: (currentTopology.daemon.involuntary_context_switches ?? 0) + topologyCalls,
+                },
+              },
         }),
       });
       return;

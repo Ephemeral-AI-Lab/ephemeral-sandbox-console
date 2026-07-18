@@ -19,9 +19,15 @@ export interface ActiveExecution {
   command?: string | null;
 }
 
+export type WorkspaceFinalizationState =
+  | "active"
+  | "finalizing"
+  | "finalize_failed";
+
 export interface WorkspaceSnapshot {
   workspace_id: string;
   lifecycle_state: string;
+  finalization_state: WorkspaceFinalizationState;
   network_profile: "shared" | "isolated";
   layers: { base_root_hash: string; layer_count: number };
   namespace_fd_count: number;
@@ -83,6 +89,29 @@ export interface CgroupSeries {
   topology: WorkspaceProcessTopology;
 }
 
+export interface SandboxResourcesResult {
+  view: "resources";
+  scope: "sandbox";
+  sandbox_id: string;
+  availability: "available" | "partial";
+  errors: string[];
+  series: ResourceSample[];
+}
+
+export interface FleetResourceCurrent {
+  availability: "available" | "partial";
+  errors: string[];
+  current: ResourceSample | null;
+}
+
+export interface FleetResourcesResult {
+  view: "resources";
+  scope: "fleet";
+  availability: "available" | "partial";
+  errors: string[];
+  sandboxes: Record<string, FleetResourceCurrent>;
+}
+
 export interface WorkspaceProcessTopology {
   schema_version: 2;
   available: boolean;
@@ -92,6 +121,12 @@ export interface WorkspaceProcessTopology {
   warnings: string[];
   workspaces: WorkspaceProcesses[];
   daemon?: DaemonProcessMetrics | null;
+}
+
+export interface TopologyResult {
+  view: "topology";
+  scope: "sandbox";
+  topology: WorkspaceProcessTopology;
 }
 
 export interface DaemonProcessMetrics {
@@ -157,6 +192,29 @@ export function fetchCgroup(
     scope,
     window_ms: windowMs,
   }, signal);
+}
+
+export function fetchSandboxResources(
+  sandboxId: string,
+  windowMs: number,
+  signal?: AbortSignal,
+): Promise<SandboxResourcesResult> {
+  return fetchObservabilityView<SandboxResourcesResult>(sandboxId, "resources", {
+    window_ms: windowMs,
+  }, signal);
+}
+
+export function fetchFleetResources(
+  signal?: AbortSignal,
+): Promise<FleetResourcesResult> {
+  return rpc<FleetResourcesResult>("resources", systemScope, {}, signal);
+}
+
+export function fetchTopology(
+  sandboxId: string,
+  signal?: AbortSignal,
+): Promise<TopologyResult> {
+  return fetchObservabilityView<TopologyResult>(sandboxId, "topology", {}, signal);
 }
 
 export interface TraceEvent {

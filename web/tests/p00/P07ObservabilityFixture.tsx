@@ -17,6 +17,15 @@ import "../../src/index.css";
 
 const sandboxId = "observability-fixture";
 const view = new URL(window.location.href).searchParams.get("view") ?? "events";
+const record = {
+  id: sandboxId,
+  workspace_root: "/fixture/workspace",
+  state: "ready" as const,
+  daemon: { host: "127.0.0.1", port: 7801 },
+  daemon_http: { host: "127.0.0.1", port: 7802 },
+  shared_base: null,
+  activity_revision: 0,
+};
 
 const snapshot = {
   sandboxes: [{
@@ -30,6 +39,7 @@ const snapshot = {
     workspaces: [{
       workspace_id: "workspace-fixture",
       lifecycle_state: "running",
+      finalization_state: "active",
       network_profile: "shared",
       layers: { base_root_hash: "fixture-base", layer_count: 3 },
       namespace_fd_count: 1,
@@ -43,7 +53,7 @@ const snapshot = {
 if (view === "daemon") installDaemonFixture();
 
 function SandboxContext() {
-  return <Outlet context={{ sandboxId, record: null, snapshot, recordError: null }} />;
+  return <Outlet context={{ sandboxId, record, recordUpdatedAt: 1, snapshot, recordError: null }} />;
 }
 
 function Fixture() {
@@ -80,18 +90,27 @@ function installDaemonFixture() {
   let sampleCount = 0;
   globalThis.fetch = async (input, init) => {
     const body = typeof init?.body === "string" ? JSON.parse(init.body) as { op?: string } : null;
-    if (body?.op !== "cgroup") return nativeFetch(input, init);
-    sampleCount += 1;
+    if (body?.op !== "resources" && body?.op !== "topology") return nativeFetch(input, init);
+    if (body.op === "topology") sampleCount += 1;
     const sampledAt = 1_700_004_000_000 + sampleCount * 400;
+    if (body.op === "resources") {
+      return new Response(JSON.stringify({
+        view: "resources",
+        scope: "sandbox",
+        sandbox_id: "sandbox-fixture",
+        availability: "available",
+        errors: [],
+        series: [{
+          ts: sampledAt,
+          sample_delta_ms: 400,
+          metrics: { cgroup_available: true, mem_cur: 74_000_000, disk_bytes: 4_000_000 },
+          deltas: { cpu_usec: 24_000, io_rbytes: 16_384, io_wbytes: 8_192 },
+        }],
+      }), { headers: { "content-type": "application/json" } });
+    }
     return new Response(JSON.stringify({
-      view: "cgroup",
+      view: "topology",
       scope: "sandbox",
-      series: [{
-        ts: sampledAt,
-        sample_delta_ms: 400,
-        metrics: { cgroup_available: true, mem_cur: 74_000_000, disk_bytes: 4_000_000 },
-        deltas: { cpu_usec: 24_000, io_rbytes: 16_384, io_wbytes: 8_192 },
-      }],
       topology: {
         schema_version: 2,
         available: true,

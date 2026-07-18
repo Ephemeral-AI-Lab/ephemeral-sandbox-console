@@ -77,6 +77,7 @@ function snapshotFor(
                 {
                   workspace_id: `workspace-${index + 1}`,
                   lifecycle_state: "running",
+                  finalization_state: "active",
                   network_profile: "shared",
                   layers: { base_root_hash: `root-${index + 1}`, layer_count: 2 },
                   namespace_fd_count: 3,
@@ -283,6 +284,32 @@ async function installFleetApi(page: Page, options: FixtureOptions = {}) {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(body),
+      });
+      return;
+    }
+
+    if (op === "resources") {
+      const sandboxes = Object.fromEntries(list
+        .filter((entry) => entry.state === "ready")
+        .map((entry) => {
+          const series = emptyUsageIds.has(entry.id)
+            ? []
+            : (options.usageById?.[entry.id] ?? [sample]);
+          return [entry.id, {
+            availability: "available",
+            errors: [],
+            current: series.at(-1) ?? null,
+          }];
+        }));
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          view: "resources",
+          scope: "fleet",
+          availability: "available",
+          errors: [],
+          sandboxes,
+        }),
       });
       return;
     }

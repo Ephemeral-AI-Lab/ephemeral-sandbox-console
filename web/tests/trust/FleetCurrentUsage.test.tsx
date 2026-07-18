@@ -4,21 +4,26 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CgroupSeries, ResourceSample, SandboxSnapshot } from "@/api/observability";
+import type {
+  FleetResourcesResult,
+  ResourceSample,
+  SandboxSnapshot,
+} from "@/api/observability";
 import type { SandboxRecord } from "@/api/types";
 import { SandboxCard } from "@/pages/fleet/SandboxCard";
 import {
   currentUsageFromSeries,
-  FLEET_USAGE_WINDOW_MS,
   useFleetCurrentUsage,
 } from "@/poll/useFleetCurrentUsage";
 
 const mocks = vi.hoisted(() => ({
+  fetchFleetResources: vi.fn(),
   fetchCgroup: vi.fn(),
 }));
 
 vi.mock("@/api/observability", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/observability")>()),
+  fetchFleetResources: mocks.fetchFleetResources,
   fetchCgroup: mocks.fetchCgroup,
 }));
 
@@ -48,20 +53,18 @@ function sample(
   };
 }
 
-function series(samples: ResourceSample[]): CgroupSeries {
+function fleetResources(
+  samples: Record<string, ResourceSample | null>,
+): FleetResourcesResult {
   return {
-    view: "cgroup",
-    scope: "sandbox",
-    series: samples,
-    topology: {
-      schema_version: 2,
-      available: false,
-      source: null,
-      error: null,
-      truncated: false,
-      warnings: [],
-      workspaces: [],
-    },
+    view: "resources",
+    scope: "fleet",
+    availability: "available",
+    errors: [],
+    sandboxes: Object.fromEntries(Object.entries(samples).map(([id, current]) => [
+      id,
+      { availability: "available", errors: [], current },
+    ])),
   };
 }
 
@@ -110,13 +113,13 @@ async function flush(milliseconds = 0) {
 describe("Fleet current usage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    mocks.fetchCgroup.mockReset();
-    mocks.fetchCgroup.mockResolvedValue(
-      series([
-        sample(1_000, 2_000, 20_000, 20_000_000),
-        sample(1_005, 5, 0, 21_000_000),
-      ]),
+    mocks.fetchFleetResources.mockReset();
+    mocks.fetchFleetResources.mockResolvedValue(
+      fleetResources({
+        "sandbox-a": sample(1_005, 2_000, 20_000, 21_000_000),
+      }),
     );
+    mocks.fetchCgroup.mockReset();
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
   });
 
@@ -137,23 +140,24 @@ describe("Fleet current usage", () => {
     });
   });
 
-  it("polls current resources only for ready sandboxes", async () => {
-    render(<Harness records={[record("sandbox-a"), record("sandbox-b", "failed")]} />, {
+  it("uses one manager fleet request per cadence independent of ready count", async () => {
+    const records = Array.from({ length: 10_000 }, (_, index) => record(
+      index === 0 ? "sandbox-a" : `sandbox-${index}`,
+    ));
+    records.push(record("failed-sandbox", "failed"));
+    render(<Harness records={records} />, {
       wrapper: createWrapper(),
     });
     await flush();
 
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(1);
-    expect(mocks.fetchCgroup).toHaveBeenCalledWith(
-      "sandbox-a",
-      "sandbox",
-      FLEET_USAGE_WINDOW_MS,
-      expect.any(AbortSignal),
-    );
+    expect(mocks.fetchFleetResources).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchFleetResources).toHaveBeenCalledWith(expect.any(AbortSignal));
+    expect(mocks.fetchCgroup).not.toHaveBeenCalled();
     expect(screen.getByText("21000000")).toBeTruthy();
 
     await flush(2_000);
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchFleetResources).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchCgroup).not.toHaveBeenCalled();
   });
 
   it("drops cached current usage when a sandbox leaves ready", async () => {

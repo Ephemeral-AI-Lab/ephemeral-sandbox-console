@@ -25,6 +25,7 @@ const snapshot = {
     workspaces: [{
       workspace_id: "workspace-fixture",
       lifecycle_state: "running",
+      finalization_state: "active",
       network_profile: "shared",
       layers: { base_root_hash: "fixture-base", layer_count: 3 },
       namespace_fd_count: 1,

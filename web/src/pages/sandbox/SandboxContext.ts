@@ -5,6 +5,8 @@ import type { SnapshotResult } from "@/api/observability";
 export interface SandboxContext {
   sandboxId: string;
   record: SandboxRecord | null;
+  /** Successful manager inspect timestamp used to order focus recovery. */
+  recordUpdatedAt?: number;
   snapshot: SnapshotResult | null;
   recordError: unknown;
 }

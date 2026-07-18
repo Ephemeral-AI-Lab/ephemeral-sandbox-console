@@ -33,6 +33,7 @@ function result({ commands = 0, leases = 0, sampledAt = 1 } = {}): SnapshotResul
       {
         workspace_id: "workspace-a",
         lifecycle_state: "active",
+        finalization_state: "active",
         network_profile: "shared",
         layers: { base_root_hash: "root", layer_count: 0 },
         namespace_fd_count: 0,

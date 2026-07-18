@@ -12,13 +12,24 @@ import {
   ScrollArea,
   Stack,
   Text,
+  Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { Globe2, Plus, Shield, Trash2 } from "lucide-react";
-import { rpc, sandboxScope } from "@/api/rpc";
-import type { WorkspaceSessionCreated, WorkspaceSessionDestroyed } from "@/api/types";
-import type { WorkspaceSnapshot } from "@/api/observability";
+import { CircleCheckBig, Globe2, Plus, Shield } from "lucide-react";
+import { RpcError, rpc, sandboxScope } from "@/api/rpc";
+import type {
+  WorkspaceSessionCreated,
+  WorkspaceSessionDestroyed,
+  WorkspaceSessionPublishCleanupDetails,
+  WorkspaceSessionPublished,
+} from "@/api/types";
+import { fetchSandboxSnapshot, type WorkspaceSnapshot } from "@/api/observability";
 import { useErrorToast } from "@/components/ErrorToast";
+import {
+  CloseWorkspaceSessionDialog,
+  type CloseWorkspaceSessionAction,
+  type CloseWorkspaceSessionProblem,
+} from "@/pages/sandbox/terminal/CloseWorkspaceSessionDialog";
 
 export type TerminalMode = "session" | "quick" | "all";
 
@@ -29,6 +40,107 @@ type CreatedSession = {
   networkProfile: NetworkProfile;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function protectedDropGuidance(reason: string): string {
+  switch (reason) {
+    case "unsupported_special_file":
+      return "Remove or replace this unsupported special file before retrying.";
+    case "invalid_layer_path":
+      return "Rename or remove this invalid LayerStack path before retrying.";
+    case "command_scratch_path":
+      return "Move the change outside the command scratch path before retrying.";
+    default:
+      return "Resolve this blocked change before retrying the publish.";
+  }
+}
+
+function closeProblem(error: unknown): CloseWorkspaceSessionProblem {
+  if (!(error instanceof RpcError) || !isRecord(error.details)) {
+    return {
+      kind: "failed",
+      title: "Publish could not be completed",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const details = error.details;
+  if (
+    details.stage === "destroy" &&
+    details.publish_completed === true &&
+    isRecord(details.publish) &&
+    isRecord(details.publish.revision) &&
+    isRecord(details.publish.route_summary)
+  ) {
+    return {
+      kind: "cleanup",
+      publish: (details as unknown as WorkspaceSessionPublishCleanupDetails).publish,
+    };
+  }
+
+  const activeCommandSessionIds = Array.isArray(details.active_command_session_ids)
+    ? details.active_command_session_ids.filter((id): id is string => typeof id === "string")
+    : [];
+  if (activeCommandSessionIds.length > 0) {
+    return {
+      kind: "retained",
+      title: "Stop active commands first",
+      message: "Publishing did not start. The complete session delta was retained.",
+      activeCommandSessionIds,
+      conflict: false,
+    };
+  }
+
+  const rejection = isRecord(details.publish_rejection)
+    ? details.publish_rejection
+    : null;
+  const sourceConflict = rejection && isRecord(rejection.source_conflict)
+    ? rejection.source_conflict
+    : null;
+  const protectedDrop = rejection && isRecord(rejection.protected_drop)
+    ? rejection.protected_drop
+    : null;
+  const protectedDropPath = typeof protectedDrop?.path === "string"
+    ? protectedDrop.path
+    : undefined;
+  const protectedDropReason = typeof protectedDrop?.reason === "string"
+    ? protectedDrop.reason
+    : undefined;
+  const reason = typeof rejection?.reason === "string" ? rejection.reason : undefined;
+  const path = typeof rejection?.path === "string"
+    ? rejection.path
+    : typeof sourceConflict?.path === "string"
+      ? sourceConflict.path
+      : protectedDropPath;
+  const retained = details.session_retained === true;
+  if (retained || rejection) {
+    const conflict = reason === "source_conflict";
+    return {
+      kind: "retained",
+      title: conflict ? "Publish conflict; session retained" : "Publish rejected; session retained",
+      message: "No LayerStack changes were committed. The complete unpublished delta remains available in this session.",
+      path,
+      reason,
+      protectedDrop: protectedDropReason
+        ? {
+            path: protectedDropPath,
+            reason: protectedDropReason,
+            guidance: protectedDropGuidance(protectedDropReason),
+          }
+        : undefined,
+      conflict,
+    };
+  }
+
+  return {
+    kind: "failed",
+    title: error.kind,
+    message: error.message,
+  };
+}
+
 export function SessionSidebar({
   sandboxId,
   workspaces,
@@ -38,6 +150,7 @@ export function SessionSidebar({
   opened,
   onClose,
   onSelect,
+  onFinalizationFailed,
 }: {
   sandboxId: string;
   workspaces: WorkspaceSnapshot[];
@@ -47,15 +160,40 @@ export function SessionSidebar({
   opened: boolean;
   onClose: () => void;
   onSelect: (mode: TerminalMode, sessionId?: string) => void;
+  onFinalizationFailed: (sessionId: string) => void;
 }) {
   const [createdSession, setCreatedSession] = useState<CreatedSession | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
-  const [destroyingSessionId, setDestroyingSessionId] = useState<string | null>(null);
+  const [dialogSessionId, setDialogSessionId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<CloseWorkspaceSessionAction | null>(null);
+  const [problem, setProblem] = useState<CloseWorkspaceSessionProblem | null>(null);
+  const [closedSessionIds, setClosedSessionIds] = useState<Set<string>>(new Set());
+  const [cleanupRequiredIds, setCleanupRequiredIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
   const { showError } = useErrorToast();
 
   const refreshSnapshot = () =>
     queryClient.invalidateQueries({ queryKey: ["sandbox", sandboxId, "snapshot"] });
+
+  const refreshRejectedSnapshot = async () => {
+    try {
+      const nextSnapshot = await fetchSandboxSnapshot(sandboxId);
+      queryClient.setQueryData(["sandbox", sandboxId, "snapshot"], nextSnapshot);
+    } catch {
+      // Preserve the structured rejection even if the immediate reconciliation
+      // request fails; invalidation still lets normal polling recover later.
+      await refreshSnapshot();
+    }
+  };
+
+  const refreshPublishedState = () =>
+    Promise.all([
+      refreshSnapshot(),
+      queryClient.invalidateQueries({
+        queryKey: ["observability", sandboxId, "layerstack"],
+      }),
+      queryClient.invalidateQueries({ queryKey: ["files", sandboxId] }),
+    ]);
 
   useEffect(() => {
     if (
@@ -65,6 +203,18 @@ export function SessionSidebar({
       setCreatedSession(null);
     }
   }, [createdSession, workspaces]);
+
+  useEffect(() => {
+    for (const workspace of workspaces) {
+      if (workspace.finalization_state === "finalize_failed") {
+        setCleanupRequiredIds((current) => {
+          if (current.has(workspace.workspace_id)) return current;
+          return new Set(current).add(workspace.workspace_id);
+        });
+        onFinalizationFailed(workspace.workspace_id);
+      }
+    }
+  }, [onFinalizationFailed, workspaces]);
 
   const createSession = async (networkProfile: NetworkProfile) => {
     if (createBusy) return;
@@ -94,35 +244,116 @@ export function SessionSidebar({
     }
   };
 
-  const destroySession = async (workspaceSessionId: string) => {
+  const closeSuccessfulSession = (workspaceSessionId: string) => {
+    setClosedSessionIds((current) => new Set(current).add(workspaceSessionId));
+    setCleanupRequiredIds((current) => {
+      if (!current.has(workspaceSessionId)) return current;
+      const next = new Set(current);
+      next.delete(workspaceSessionId);
+      return next;
+    });
+    setDialogSessionId(null);
+    setProblem(null);
+    if (mode === "session" && selected === workspaceSessionId) onSelect("quick");
+  };
+
+  const publishSession = async (workspaceSessionId: string) => {
     const target = workspaces.find(
       (workspace) => workspace.workspace_id === workspaceSessionId,
     );
     if (
       !target ||
-      destroyingSessionId !== null ||
+      busyAction !== null ||
+      target.finalization_state !== "active" ||
       target.active_namespace_executions.length > 0
     ) return;
-    setDestroyingSessionId(workspaceSessionId);
+    setBusyAction("publish");
+    setProblem(null);
+    try {
+      const output = await rpc<WorkspaceSessionPublished>(
+        "publish_workspace_session",
+        sandboxScope(sandboxId),
+        { workspace_session_id: workspaceSessionId },
+      );
+      closeSuccessfulSession(workspaceSessionId);
+      await refreshPublishedState();
+      notifications.show({
+        color: "success",
+        title: output.publish.no_op
+          ? "No changes to publish; session closed"
+          : "Workspace session published",
+        message: output.publish.no_op
+          ? output.workspace_session_id
+          : `${output.workspace_session_id} · manifest v${output.publish.revision.manifest_version} · ${output.publish.revision.layer_count} ${output.publish.revision.layer_count === 1 ? "layer" : "layers"}`,
+      });
+    } catch (error) {
+      const nextProblem = closeProblem(error);
+      setProblem(nextProblem);
+      if (nextProblem.kind === "cleanup") {
+        setCleanupRequiredIds((current) => new Set(current).add(workspaceSessionId));
+        onFinalizationFailed(workspaceSessionId);
+        await refreshPublishedState();
+        notifications.show({
+          color: "yellow",
+          title: "Published; cleanup required",
+          message: `${workspaceSessionId} · use Discard & close to finish cleanup`,
+        });
+      } else if (nextProblem.kind === "retained") {
+        await refreshRejectedSnapshot();
+      } else if (nextProblem.kind === "failed") {
+        showError(error);
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const destroySession = async (workspaceSessionId: string) => {
+    const target = workspaces.find(
+      (workspace) => workspace.workspace_id === workspaceSessionId,
+    );
+    const cleanupRequired = cleanupRequiredIds.has(workspaceSessionId) ||
+      target?.finalization_state === "finalize_failed";
+    if (
+      !target ||
+      busyAction !== null ||
+      (!cleanupRequired && target.finalization_state !== "active") ||
+      target.active_namespace_executions.length > 0
+    ) return;
+    setBusyAction("discard");
+    setProblem(null);
     try {
       const output = await rpc<WorkspaceSessionDestroyed>(
         "destroy_workspace_session",
         sandboxScope(sandboxId),
         { workspace_session_id: workspaceSessionId },
       );
-      if (mode === "session" && selected === workspaceSessionId) onSelect("quick");
+      closeSuccessfulSession(workspaceSessionId);
       await refreshSnapshot();
       notifications.show({
         color: "success",
-        title: "Workspace session destroyed",
+        title: cleanupRequired ? "Workspace session cleanup complete" : "Workspace session discarded",
         message: `${output.workspace_session_id} · ${output.evicted_upperdir_bytes} bytes evicted`,
       });
     } catch (error) {
+      setProblem({
+        kind: "failed",
+        title: "Session could not be closed",
+        message: error instanceof Error ? error.message : String(error),
+      });
       showError(error);
     } finally {
-      setDestroyingSessionId(null);
+      setBusyAction(null);
     }
   };
+
+  const dialogWorkspace = workspaces.find(
+    (workspace) => workspace.workspace_id === dialogSessionId,
+  );
+  const dialogCleanupRequired = dialogSessionId !== null && (
+    cleanupRequiredIds.has(dialogSessionId) ||
+    dialogWorkspace?.finalization_state === "finalize_failed"
+  );
 
   const sessions = (
     <SessionList
@@ -132,8 +363,14 @@ export function SessionSidebar({
       mode={mode}
       selected={selected}
       narrow={narrow}
-      destroyingSessionId={destroyingSessionId}
-      onDestroy={(workspaceId) => void destroySession(workspaceId)}
+      busySessionId={busyAction ? dialogSessionId : null}
+      cleanupRequiredIds={cleanupRequiredIds}
+      closedSessionIds={closedSessionIds}
+      onCloseSession={(workspaceId) => {
+        setDialogSessionId(workspaceId);
+        setProblem(null);
+        if (narrow) onClose();
+      }}
       onSelect={onSelect}
       onCreate={(networkProfile) => void createSession(networkProfile)}
     />
@@ -143,6 +380,7 @@ export function SessionSidebar({
     <>
       {narrow ? (
         <Drawer
+          closeButtonProps={{ "aria-label": "Close workspace sessions" }}
           data-terminal-sessions-drawer
           opened={opened}
           onClose={onClose}
@@ -163,6 +401,25 @@ export function SessionSidebar({
           {sessions}
         </Paper>
       )}
+      <CloseWorkspaceSessionDialog
+        busyAction={busyAction}
+        cleanupRequired={dialogCleanupRequired}
+        onClose={() => {
+          if (busyAction === null) {
+            setDialogSessionId(null);
+            setProblem(null);
+          }
+        }}
+        onDiscard={() => {
+          if (dialogSessionId) void destroySession(dialogSessionId);
+        }}
+        onPublish={() => {
+          if (dialogSessionId) void publishSession(dialogSessionId);
+        }}
+        opened={dialogSessionId !== null}
+        problem={problem}
+        workspaceSessionId={dialogSessionId}
+      />
     </>
   );
 }
@@ -174,8 +431,10 @@ function SessionList({
   mode,
   selected,
   narrow,
-  destroyingSessionId,
-  onDestroy,
+  busySessionId,
+  cleanupRequiredIds,
+  closedSessionIds,
+  onCloseSession,
   onCreate,
   onSelect,
 }: {
@@ -185,18 +444,23 @@ function SessionList({
   mode: TerminalMode;
   selected: string | null;
   narrow: boolean;
-  destroyingSessionId: string | null;
-  onDestroy: (workspaceId: string) => void;
+  busySessionId: string | null;
+  cleanupRequiredIds: Set<string>;
+  closedSessionIds: Set<string>;
+  onCloseSession: (workspaceId: string) => void;
   onCreate: (networkProfile: NetworkProfile) => void;
   onSelect: (mode: TerminalMode, sessionId?: string) => void;
 }) {
-  const sessions = workspaces.map((workspace) => ({
-    workspaceSessionId: workspace.workspace_id,
-    networkProfile: workspace.network_profile,
-    layerCount: workspace.layers.layer_count,
-    activeCommands: workspace.active_namespace_executions.length,
-    persisted: true,
-  }));
+  const sessions = workspaces
+    .filter((workspace) => !closedSessionIds.has(workspace.workspace_id))
+    .map((workspace) => ({
+      workspaceSessionId: workspace.workspace_id,
+      networkProfile: workspace.network_profile,
+      layerCount: workspace.layers.layer_count,
+      activeCommands: workspace.active_namespace_executions.length,
+      finalizationState: workspace.finalization_state,
+      persisted: true,
+    }));
   if (
     createdSession &&
     !sessions.some((session) => session.workspaceSessionId === createdSession.workspaceSessionId)
@@ -205,6 +469,7 @@ function SessionList({
       ...createdSession,
       layerCount: 0,
       activeCommands: 0,
+      finalizationState: "active" as const,
       persisted: false,
     });
   }
@@ -247,13 +512,25 @@ function SessionList({
       <ScrollArea data-terminal-session-scroll style={{ flex: 1, minHeight: 0 }} type="auto">
         <Stack gap={2} px="sm" pb="sm">
           {sessions.map((session) => {
-            const destroyLabel = `Destroy workspace session ${session.workspaceSessionId}`;
+            const closeLabel = `Close workspace session ${session.workspaceSessionId}`;
+            const cleanupRequired = cleanupRequiredIds.has(session.workspaceSessionId) ||
+              session.finalizationState === "finalize_failed";
+            const closeDisabled = session.activeCommands > 0 ||
+              session.finalizationState === "finalizing" ||
+              busySessionId === session.workspaceSessionId;
+            const closeHint = session.activeCommands > 0
+              ? `Stop ${session.activeCommands === 1 ? "the active command" : `${session.activeCommands} active commands`} first`
+              : session.finalizationState === "finalizing"
+                ? "Workspace session is finalizing"
+                : cleanupRequired
+                  ? `Complete cleanup for workspace session ${session.workspaceSessionId}`
+                  : `Publish or discard, then close ${session.workspaceSessionId}`;
             return (
               <Group key={session.workspaceSessionId} gap={4} wrap="nowrap">
                 <NavLink
                   active={mode === "session" && selected === session.workspaceSessionId}
                   aria-label={`Use workspace session ${session.workspaceSessionId}`}
-                  description={`${session.networkProfile} · ${session.layerCount} ${session.layerCount === 1 ? "layer" : "layers"}`}
+                  description={`${session.networkProfile} · ${session.layerCount} ${session.layerCount === 1 ? "layer" : "layers"}${cleanupRequired ? " · cleanup required" : ""}`}
                   label={session.workspaceSessionId}
                   onClick={() => onSelect("session", session.workspaceSessionId)}
                   title={session.workspaceSessionId}
@@ -268,22 +545,32 @@ function SessionList({
                   }}
                 />
                 {session.persisted ? (
-                  <ActionIcon
-                    aria-label={destroyLabel}
-                    color="danger"
-                    disabled={session.activeCommands > 0 || destroyingSessionId !== null}
-                    loading={destroyingSessionId === session.workspaceSessionId}
-                    onClick={() => onDestroy(session.workspaceSessionId)}
-                    size={44}
-                    title={
-                      session.activeCommands > 0
-                        ? `Stop ${session.activeCommands === 1 ? "the active command" : `${session.activeCommands} active commands`} first`
-                        : destroyLabel
-                    }
-                    variant="subtle"
-                  >
-                    <Trash2 aria-hidden="true" size={16} />
-                  </ActionIcon>
+                  <Tooltip label={closeHint} position="right" withArrow>
+                    <span
+                      data-close-workspace-session-control
+                      style={{ display: "inline-flex", flex: "0 0 44px" }}
+                    >
+                      <ActionIcon
+                        aria-label={closeLabel}
+                        color={cleanupRequired ? "yellow" : "eyeBlue"}
+                        disabled={closeDisabled}
+                        loading={busySessionId === session.workspaceSessionId}
+                        onClick={() => onCloseSession(session.workspaceSessionId)}
+                        size="44px"
+                        style={{
+                          flexShrink: 0,
+                          height: 44,
+                          minHeight: 44,
+                          minWidth: 44,
+                          width: 44,
+                        }}
+                        title={closeHint}
+                        variant="subtle"
+                      >
+                        <CircleCheckBig aria-hidden="true" size={17} />
+                      </ActionIcon>
+                    </span>
+                  </Tooltip>
                 ) : null}
               </Group>
             );

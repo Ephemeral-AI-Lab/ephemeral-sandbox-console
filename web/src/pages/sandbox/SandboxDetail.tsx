@@ -92,6 +92,7 @@ export function SandboxDetail() {
           context={{
             sandboxId,
             record: record.data ?? null,
+            recordUpdatedAt: record.dataUpdatedAt,
             snapshot: snapshot.data ?? null,
             recordError: record.error ?? null,
           }}

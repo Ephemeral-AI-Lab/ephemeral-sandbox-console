@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { PanelLeft } from "lucide-react";
 import {
@@ -32,8 +32,17 @@ export function FilesTab() {
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const narrow = useMediaQuery("(max-width: 47.99em)");
   const path = searchParams.get("path") ?? "";
-  const session = searchParams.get("session");
+  const requestedSession = searchParams.get("session");
   const workspaces = snapshot?.sandboxes[0]?.workspaces ?? [];
+  const sessionWorkspace = workspaces.find(
+    (workspace) => workspace.workspace_id === requestedSession,
+  );
+  const session = sessionWorkspace?.finalization_state === "active"
+    ? requestedSession
+    : null;
+  const fileWorkspaces = workspaces.filter(
+    (workspace) => workspace.finalization_state === "active",
+  );
 
   const apply = (next: { path?: string | null; session?: string | null }) => {
     const params = new URLSearchParams(searchParams);
@@ -48,6 +57,13 @@ export function FilesTab() {
     setSearchParams(params, { replace: true });
   };
 
+  useEffect(() => {
+    if (!snapshot || !requestedSession || requestedSession === session) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("session");
+    setSearchParams(params, { replace: true });
+  }, [requestedSession, searchParams, session, setSearchParams, snapshot]);
+
   const navigator = (
     <FileNavigator
       onScopeChange={(value) => apply({ session: value === PUBLISHED ? null : value ?? null })}
@@ -58,7 +74,7 @@ export function FilesTab() {
       sandboxId={sandboxId}
       selectedPath={path}
       session={session}
-      workspaces={workspaces}
+      workspaces={fileWorkspaces}
     />
   );
 

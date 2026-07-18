@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DaemonView } from "@/pages/sandbox/observability/DaemonView";
 
 const mocks = vi.hoisted(() => ({
+  fetchSandboxResources: vi.fn(),
+  fetchTopology: vi.fn(),
   fetchCgroup: vi.fn(),
   readDaemonCapture: vi.fn(),
   appendDaemonCapture: vi.fn(),
@@ -15,6 +17,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/api/observability", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/observability")>()),
+  fetchSandboxResources: mocks.fetchSandboxResources,
+  fetchTopology: mocks.fetchTopology,
   fetchCgroup: mocks.fetchCgroup,
 }));
 
@@ -52,8 +56,11 @@ async function flush(milliseconds = 0) {
 describe("daemon diagnostic capture", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mocks.fetchSandboxResources.mockReset();
+    mocks.fetchSandboxResources.mockResolvedValue(resourcesResponse());
+    mocks.fetchTopology.mockReset();
+    mocks.fetchTopology.mockResolvedValue(topologyResponse());
     mocks.fetchCgroup.mockReset();
-    mocks.fetchCgroup.mockResolvedValue(response());
     mocks.readDaemonCapture.mockReset();
     mocks.readDaemonCapture.mockResolvedValue([]);
     mocks.appendDaemonCapture.mockReset();
@@ -74,12 +81,16 @@ describe("daemon diagnostic capture", () => {
     await flush();
     await flush();
 
-    expect(mocks.fetchCgroup).toHaveBeenCalledWith(
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledWith(
       "sandbox-a",
-      "sandbox",
       60_000,
       expect.any(AbortSignal),
     );
+    expect(mocks.fetchTopology).toHaveBeenCalledWith(
+      "sandbox-a",
+      expect.any(AbortSignal),
+    );
+    expect(mocks.fetchCgroup).not.toHaveBeenCalled();
     expect(screen.getByText("Daemon diagnostic capture")).toBeTruthy();
     expect(screen.getByText("no managed namespaces")).toBeTruthy();
     expect(screen.getByText("71MiB")).toBeTruthy();
@@ -89,24 +100,37 @@ describe("daemon diagnostic capture", () => {
     expect(screen.getByText("1 / 900")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    const callsAfterPause = mocks.fetchCgroup.mock.calls.length;
+    const resourceCallsAfterPause = mocks.fetchSandboxResources.mock.calls.length;
+    const topologyCallsAfterPause = mocks.fetchTopology.mock.calls.length;
     await flush(10_000);
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(callsAfterPause);
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledTimes(resourceCallsAfterPause);
+    expect(mocks.fetchTopology).toHaveBeenCalledTimes(topologyCallsAfterPause);
+    expect(mocks.fetchCgroup).not.toHaveBeenCalled();
 
     view.unmount();
   });
 });
 
-function response() {
+function resourcesResponse() {
   return {
-    view: "cgroup" as const,
+    view: "resources" as const,
     scope: "sandbox",
+    sandbox_id: "sandbox-a",
+    availability: "available" as const,
+    errors: [],
     series: [{
       ts: 1_700_000_000_000,
       sample_delta_ms: 2_000,
       metrics: { mem_cur: 74_000_000 },
       deltas: {},
     }],
+  };
+}
+
+function topologyResponse() {
+  return {
+    view: "topology" as const,
+    scope: "sandbox",
     topology: {
       schema_version: 2 as const,
       available: true,

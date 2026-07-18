@@ -39,6 +39,7 @@ function snapshot(id: string, commands = 0, sessions = 1): SandboxSnapshot {
     workspaces: Array.from({ length: sessions }, (_, workspaceIndex) => ({
       workspace_id: `workspace-${workspaceIndex}`,
       lifecycle_state: "active",
+      finalization_state: "active" as const,
       network_profile: "shared" as const,
       layers: { base_root_hash: "root", layer_count: 0 },
       namespace_fd_count: 0,

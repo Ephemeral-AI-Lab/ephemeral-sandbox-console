@@ -66,3 +66,74 @@ export interface WorkspaceSessionDestroyed {
   destroyed: true;
   evicted_upperdir_bytes: number;
 }
+
+export interface WorkspaceSessionRevision {
+  manifest_version: number;
+  root_hash: string;
+  layer_count: number;
+}
+
+export interface WorkspaceSessionPublishSummary {
+  no_op: boolean;
+  revision: WorkspaceSessionRevision;
+  route_summary: {
+    source_count: number;
+    ignored_count: number;
+  };
+}
+
+export interface WorkspaceSessionPublished {
+  workspace_session_id: string;
+  publish: WorkspaceSessionPublishSummary;
+  destroyed: true;
+  evicted_upperdir_bytes: number;
+}
+
+export type WorkspaceSessionPublishRejectionReason =
+  | "invalid_base_revision"
+  | "protected_path"
+  | "source_conflict"
+  | "opaque_dir_protected_descendant"
+  | "opaque_dir_mixed_routes"
+  | "opaque_dir_expansion_limit"
+  | "route_preparation_failed";
+
+export type WorkspaceSessionProtectedDropReason =
+  | "unsupported_special_file"
+  | "invalid_layer_path"
+  | "command_scratch_path";
+
+export interface WorkspaceSessionPublishRejection {
+  path: string | null;
+  reason: WorkspaceSessionPublishRejectionReason;
+  source_conflict: {
+    path: string;
+    expected: Record<string, unknown>;
+    actual: Record<string, unknown>;
+  } | null;
+  protected_drop: {
+    path?: string;
+    reason: WorkspaceSessionProtectedDropReason;
+    [key: string]: unknown;
+  } | null;
+  message: string | null;
+}
+
+export interface WorkspaceSessionPublishRetainedDetails {
+  workspace_session_id: string;
+  stage: "capture" | "publish";
+  session_retained: true;
+  publish_rejection?: WorkspaceSessionPublishRejection;
+  active_command_session_ids?: string[];
+}
+
+export interface WorkspaceSessionPublishCleanupDetails {
+  workspace_session_id: string;
+  stage: "destroy";
+  publish_completed: true;
+  layer_committed: boolean;
+  publish: WorkspaceSessionPublishSummary;
+  destroyed: false;
+  session_state: "finalize_failed";
+  recovery_operation: "destroy_workspace_session";
+}

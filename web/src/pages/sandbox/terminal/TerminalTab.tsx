@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Box, Button, Center, Flex, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Alert, Box, Button, Center, Flex, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { PanelLeft } from "lucide-react";
 import { rpc, sandboxScope } from "@/api/rpc";
@@ -29,36 +29,80 @@ export function TerminalTab() {
   const location = useLocation();
   const queryClient = useQueryClient();
 
-  const selectedSession = searchParams.get("session");
-  const mode: TerminalMode = selectedSession
-    ? "session"
-    : searchParams.get("view") === "all"
-      ? "all"
-      : "quick";
+  const requestedSession = searchParams.get("session");
   const [ledger, setLedger] = useState<LedgerEntry[]>(() => loadLedger(sandboxId));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [finalizationFailedIds, setFinalizationFailedIds] = useState<Set<string>>(new Set());
+  const [optimisticSessionIds, setOptimisticSessionIds] = useState<Set<string>>(new Set());
   const ledgerPaneRef = useRef<HTMLDivElement>(null);
   const finalizingRef = useRef<Set<string>>(new Set());
   const narrow = useMediaQuery("(max-width: 47.99em)");
 
+  const workspaceSnapshot = useMemo(
+    () => snapshot?.sandboxes.find((sandbox) => sandbox.sandbox_id === sandboxId) ?? null,
+    [sandboxId, snapshot],
+  );
+  const workspaces = workspaceSnapshot?.workspaces ?? [];
+  const requestedWorkspace = useMemo(
+    () => workspaces.find((workspace) => workspace.workspace_id === requestedSession) ?? null,
+    [requestedSession, workspaces],
+  );
+  const selectedSessionMissing = requestedSession !== null &&
+    workspaceSnapshot !== null &&
+    requestedWorkspace === null &&
+    !optimisticSessionIds.has(requestedSession);
+  const selectedSession = selectedSessionMissing ? null : requestedSession;
+  const mode: TerminalMode = selectedSessionMissing
+    ? "quick"
+    : selectedSession
+      ? "session"
+      : searchParams.get("view") === "all"
+        ? "all"
+        : "quick";
+
   useEffect(() => {
     setLedger(loadLedger(sandboxId));
     setExpanded(new Set());
+    setOptimisticSessionIds(new Set());
   }, [sandboxId]);
 
   useEffect(() => {
     saveLedger(sandboxId, ledger);
   }, [sandboxId, ledger]);
 
-  const workspaces = useMemo(
-    () => snapshot?.sandboxes[0]?.workspaces ?? [],
-    [snapshot],
-  );
   const selectedWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.workspace_id === selectedSession) ?? null,
     [selectedSession, workspaces],
   );
+  const selectedFinalizationState = selectedSession && finalizationFailedIds.has(selectedSession)
+    ? "finalize_failed"
+    : selectedWorkspace?.finalization_state;
+  const markFinalizationFailed = useCallback((workspaceSessionId: string) => {
+    setFinalizationFailedIds((current) => {
+      if (current.has(workspaceSessionId)) return current;
+      return new Set(current).add(workspaceSessionId);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSessionMissing) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("session");
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, selectedSessionMissing, setSearchParams]);
+
+  useEffect(() => {
+    if (optimisticSessionIds.size === 0) return;
+    const observedIds = new Set(workspaces.map((workspace) => workspace.workspace_id));
+    setOptimisticSessionIds((current) => {
+      const next = new Set(
+        [...current].filter((workspaceSessionId) => !observedIds.has(workspaceSessionId)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [optimisticSessionIds.size, workspaces]);
 
   const inFlight = useMemo(() => {
     const map = new Map<string, { workspaceId: string; command: string | null }>();
@@ -202,9 +246,13 @@ export function TerminalTab() {
           narrow={narrow}
           opened={sessionsOpen}
           onClose={() => setSessionsOpen(false)}
+          onFinalizationFailed={markFinalizationFailed}
           onSelect={(nextMode, sessionId) => {
             const next = new URLSearchParams(searchParams);
             if (nextMode === "session" && sessionId) {
+              if (!workspaces.some((workspace) => workspace.workspace_id === sessionId)) {
+                setOptimisticSessionIds((current) => new Set(current).add(sessionId));
+              }
               next.set("session", sessionId);
               next.delete("view");
             } else {
@@ -283,6 +331,19 @@ export function TerminalTab() {
             <Text c="dimmed" size="sm">
               Choose a workspace session or Quick run to run a command.
             </Text>
+          </Paper>
+        ) : mode === "session" && selectedFinalizationState !== undefined && selectedFinalizationState !== "active" ? (
+          <Paper data-terminal-session-unavailable px="md" py="sm" radius={0} withBorder>
+            <Alert
+              color={selectedFinalizationState === "finalize_failed" ? "yellow" : "blue"}
+              title={selectedFinalizationState === "finalize_failed"
+                ? "Published; cleanup required"
+                : "Workspace session is finalizing"}
+            >
+              {selectedFinalizationState === "finalize_failed"
+                ? "Commands, files, and publishing are disabled. Use Close workspace session in the session list, then Discard & close to finish cleanup."
+                : "Commands are disabled while this workspace session is finalizing."}
+            </Alert>
           </Paper>
         ) : (
           <CommandComposer

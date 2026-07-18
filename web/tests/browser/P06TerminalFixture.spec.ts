@@ -5,12 +5,21 @@ import { measureFromTimestampToPaintP95 } from "./performance";
 type TerminalApi = {
   createdProfiles: string[];
   destroyedSessions: string[];
+  publishedSessions: string[];
+  publishArgs: Record<string, unknown>[];
   execArgs: Record<string, unknown>[];
   stdinWrites: string[];
+  snapshotCalls: number;
   readCalls: number;
   failedReadCalls: number;
   failTranscript: () => void;
+  holdNextPublish: () => void;
+  removeSession: (workspaceSessionId: string) => Promise<void>;
+  releasePublish: () => void;
+  setPublishOutcome: (outcome: PublishOutcome) => void;
 };
+
+type PublishOutcome = "commit" | "no-op" | "conflict" | "protected-drop" | "partial";
 
 const FIXTURE_NOW = 1_700_003_600_000;
 
@@ -33,16 +42,50 @@ async function installTerminalApi(page: Page, failInitially = false): Promise<Te
   let transcriptFailure = failInitially;
   let readCalls = 0;
   let failedReadCalls = 0;
+  let snapshotCalls = 0;
   const stdinWrites: string[] = [];
   const createdProfiles: string[] = [];
   const destroyedSessions: string[] = [];
+  const publishedSessions: string[] = [];
+  const publishArgs: Record<string, unknown>[] = [];
   const execArgs: Record<string, unknown>[] = [];
+  let publishOutcome: PublishOutcome = "commit";
+  let holdNextPublish = false;
+  let releasePublish: (() => void) | null = null;
+  let rejectedSessionToRestore: string | null = null;
+
+  const updateSessionFixture = async (
+    action: "remove" | "active" | "finalizing" | "finalize-failed",
+    workspaceSessionId: string,
+  ) => {
+    await page.evaluate(
+      ({ fixtureAction, sessionId }) => {
+        window.dispatchEvent(new CustomEvent("p06-session-fixture", {
+          detail: { action: fixtureAction, workspaceSessionId: sessionId },
+        }));
+      },
+      { fixtureAction: action, sessionId: workspaceSessionId },
+    );
+  };
 
   await page.route("**/api/rpc", async (route) => {
     const { op, args } = route.request().postDataJSON() as {
       op: string;
       args: Record<string, unknown>;
     };
+
+    if (op === "snapshot") {
+      snapshotCalls += 1;
+      if (rejectedSessionToRestore) {
+        await updateSessionFixture("active", rejectedSessionToRestore);
+        rejectedSessionToRestore = null;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ sandboxes: [] }),
+      });
+      return;
+    }
 
     if (op === "read_command_lines") {
       readCalls += 1;
@@ -119,6 +162,128 @@ async function installTerminalApi(page: Page, failInitially = false): Promise<Te
       return;
     }
 
+    if (op === "publish_workspace_session") {
+      const workspaceSessionId = String(args.workspace_session_id ?? "");
+      publishedSessions.push(workspaceSessionId);
+      publishArgs.push(args);
+      if (holdNextPublish) {
+        holdNextPublish = false;
+        await new Promise<void>((resolve) => {
+          releasePublish = resolve;
+        });
+        releasePublish = null;
+      }
+
+      const publish = {
+        no_op: publishOutcome === "no-op",
+        revision: {
+          manifest_version: publishOutcome === "no-op" ? 4 : 5,
+          root_hash: publishOutcome === "no-op" ? "fixture-base" : "fixture-published",
+          layer_count: publishOutcome === "no-op" ? 4 : 5,
+        },
+        route_summary: {
+          source_count: publishOutcome === "no-op" ? 0 : 2,
+          ignored_count: 0,
+        },
+      };
+
+      if (publishOutcome === "conflict") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              kind: "operation_failed",
+              message: "workspace session publish was rejected",
+              details: {
+                workspace_session_id: workspaceSessionId,
+                stage: "publish",
+                session_retained: true,
+                publish_rejection: {
+                  path: "notes.txt",
+                  reason: "source_conflict",
+                  source_conflict: {
+                    path: "notes.txt",
+                    expected: { kind: "file", digest: "expected", executable: false },
+                    actual: { kind: "file", digest: "actual", executable: false },
+                  },
+                  protected_drop: null,
+                  message: null,
+                },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (publishOutcome === "protected-drop") {
+        rejectedSessionToRestore = workspaceSessionId;
+        await updateSessionFixture("finalizing", workspaceSessionId);
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              kind: "operation_failed",
+              message: "workspace session publish was rejected",
+              details: {
+                workspace_session_id: workspaceSessionId,
+                stage: "capture",
+                session_retained: true,
+                publish_rejection: {
+                  path: null,
+                  reason: "protected_path",
+                  source_conflict: null,
+                  protected_drop: {
+                    path: "run.fifo",
+                    reason: "unsupported_special_file",
+                    file_kind: "fifo",
+                  },
+                  message: null,
+                },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (publishOutcome === "partial") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              kind: "operation_failed",
+              message: "workspace session published but could not be closed",
+              details: {
+                workspace_session_id: workspaceSessionId,
+                stage: "destroy",
+                publish_completed: true,
+                layer_committed: true,
+                publish,
+                destroyed: false,
+                session_state: "finalize_failed",
+                recovery_operation: "destroy_workspace_session",
+              },
+            },
+          }),
+        });
+        await updateSessionFixture("finalize-failed", workspaceSessionId);
+        return;
+      }
+
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          workspace_session_id: workspaceSessionId,
+          publish,
+          destroyed: true,
+          evicted_upperdir_bytes: publishOutcome === "no-op" ? 0 : 4096,
+        }),
+      });
+      await updateSessionFixture("remove", workspaceSessionId);
+      return;
+    }
+
     if (op === "destroy_workspace_session") {
       destroyedSessions.push(String(args.workspace_session_id ?? ""));
       await route.fulfill({
@@ -129,6 +294,7 @@ async function installTerminalApi(page: Page, failInitially = false): Promise<Te
           evicted_upperdir_bytes: 4096,
         }),
       });
+      await updateSessionFixture("remove", String(args.workspace_session_id ?? ""));
       return;
     }
 
@@ -142,6 +308,8 @@ async function installTerminalApi(page: Page, failInitially = false): Promise<Te
   return {
     createdProfiles,
     destroyedSessions,
+    publishedSessions,
+    publishArgs,
     execArgs,
     stdinWrites,
     get readCalls() {
@@ -150,7 +318,15 @@ async function installTerminalApi(page: Page, failInitially = false): Promise<Te
     get failedReadCalls() {
       return failedReadCalls;
     },
+    get snapshotCalls() {
+      return snapshotCalls;
+    },
     failTranscript: () => { transcriptFailure = true; },
+    holdNextPublish: () => { holdNextPublish = true; },
+    removeSession: (workspaceSessionId) =>
+      updateSessionFixture("remove", workspaceSessionId),
+    releasePublish: () => { releasePublish?.(); },
+    setPublishOutcome: (outcome) => { publishOutcome = outcome; },
   };
 }
 
@@ -160,6 +336,15 @@ async function openTerminal(page: Page, large = false, failInitially = false) {
   await page.goto(`/p06-terminal.html${large ? "?large=1" : ""}`);
   await expect(page.locator("[data-terminal-workspace]")).toBeVisible();
   await expect(page.locator("[data-terminal-command]")).toHaveCount(large ? 1 : 3);
+  return api;
+}
+
+async function openTerminalScenario(page: Page, query: string, commandCount = 3) {
+  const api = await installTerminalApi(page);
+  await page.clock.setFixedTime(FIXTURE_NOW);
+  await page.goto(`/p06-terminal.html${query}`);
+  await expect(page.locator("[data-terminal-workspace]")).toBeVisible();
+  await expect(page.locator("[data-terminal-command]")).toHaveCount(commandCount);
   return api;
 }
 
@@ -234,7 +419,7 @@ test("P06 sidebar selection sets the execution target and blocks invalid inline 
   await expect(page).toHaveScreenshot("p06-terminal-invalid-timeout-375x812.png", { animations: "disabled" });
 });
 
-test("P06 creates and safely destroys explicit workspace sessions", async ({ page }) => {
+test("P06 creates and safely discards explicit workspace sessions", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const api = await openTerminal(page);
 
@@ -251,20 +436,243 @@ test("P06 creates and safely destroys explicit workspace sessions", async ({ pag
   expect(api.execArgs.at(-1)?.timeout_ms).toBe(300_000);
 
   const sessionRail = page.locator("[data-terminal-session-rail]");
-  const activeSessionDestroy = sessionRail.getByRole("button", {
-    name: "Destroy workspace session workspace-alpha",
+  const activeSessionClose = sessionRail.getByRole("button", {
+    name: "Close workspace session workspace-alpha",
   });
-  await expect(activeSessionDestroy).toBeDisabled();
-  await expect(activeSessionDestroy).toHaveAttribute("title", "Stop the active command first");
+  await expect(activeSessionClose).toBeDisabled();
+  await expect(activeSessionClose).toHaveAttribute("title", "Stop the active command first");
   await expect(sessionRail.getByText("Selected session")).toHaveCount(0);
 
   await sessionRail.getByText("workspace-alpha", { exact: true }).click();
   await expect(page.getByText("history: workspace-alpha")).toBeVisible();
-  await sessionRail.getByRole("button", { name: "Destroy workspace session workspace-beta" }).click();
-  await expect(page.getByRole("dialog", { name: "Destroy workspace session" })).toHaveCount(0);
+  await sessionRail.getByRole("button", { name: "Close workspace session workspace-beta" }).click();
+  const dialog = page.getByRole("dialog", { name: "Close workspace session" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Discard & close" }).click();
   await expect.poll(() => api.destroyedSessions).toEqual(["workspace-beta"]);
-  await expect(page.getByText("Workspace session destroyed")).toBeVisible();
+  await expect(page.getByText("Workspace session discarded")).toBeVisible();
   await expect(page.getByText("history: workspace-alpha")).toBeVisible();
+});
+
+test("UI-01 close action and decision dialog are accessible, responsive, and busy-safe @a11y @visual", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await openTerminal(page);
+  const rail = page.locator("[data-terminal-session-rail]");
+  const activeClose = rail.getByRole("button", {
+    name: "Close workspace session workspace-alpha",
+  });
+  await expect(activeClose).toBeDisabled();
+  await activeClose.locator("..").hover();
+  await expect(page.getByText("Stop the active command first", { exact: true })).toBeVisible();
+
+  const closeBeta = rail.getByRole("button", {
+    name: "Close workspace session workspace-beta",
+  });
+  await expect(closeBeta).toHaveCSS("height", "44px");
+  await expect(closeBeta).toHaveCSS("width", "44px");
+  await closeBeta.click();
+  let dialog = page.getByRole("dialog", { name: "Close workspace session" });
+  await expect(dialog).toContainText(
+    "Choose what happens to this session's unpublished changes. Publishing merges them into the latest LayerStack snapshot when safe, then closes workspace-beta.",
+  );
+  await expect(dialog.getByRole("button", { name: "Publish to LayerStack & close" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Discard & close" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Close workspace session dialog" })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).disableRules("page-has-heading-one").analyze()).violations).toEqual([]);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(api.publishedSessions).toEqual([]);
+  expect(api.destroyedSessions).toEqual([]);
+
+  await closeBeta.click();
+  dialog = page.getByRole("dialog", { name: "Close workspace session" });
+  api.holdNextPublish();
+  await dialog.getByRole("button", { name: "Publish to LayerStack & close" }).click();
+  await expect.poll(() => api.publishedSessions).toEqual(["workspace-beta"]);
+  await expect(dialog.getByRole("button", { name: "Publishing…" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Discard & close" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+  await expect(closeBeta).toBeDisabled();
+  api.releasePublish();
+  await expect(dialog).toBeHidden();
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/p06-terminal.html?idle=1");
+  await expect(page.locator("[data-terminal-workspace]")).toBeVisible();
+  await page.getByRole("button", { name: "Open sessions" }).click();
+  const drawer = page.getByRole("dialog", { name: "Workspace sessions" });
+  const narrowClose = drawer.getByRole("button", {
+    name: "Close workspace session workspace-beta",
+  });
+  await expect(narrowClose).toBeVisible();
+  await narrowClose.click();
+  dialog = page.getByRole("dialog", { name: "Close workspace session" });
+  const cancelBox = await dialog.getByRole("button", { name: "Cancel" }).boundingBox();
+  const discardBox = await dialog.getByRole("button", { name: "Discard & close" }).boundingBox();
+  const publishBox = await dialog.getByRole("button", { name: "Publish to LayerStack & close" }).boundingBox();
+  expect(cancelBox).not.toBeNull();
+  expect(discardBox).not.toBeNull();
+  expect(publishBox).not.toBeNull();
+  expect(discardBox!.y).toBeGreaterThan(cancelBox!.y);
+  expect(publishBox!.y).toBeGreaterThan(discardBox!.y);
+  await expect(drawer).toBeHidden();
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).disableRules("page-has-heading-one").analyze()).violations).toEqual([]);
+  await expect(page).toHaveScreenshot("ui-01-close-workspace-session-narrow-375x812.png", {
+    animations: "disabled",
+  });
+});
+
+test("UI-02 commit and no-op success close the row and select Quick run", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await openTerminal(page);
+  const rail = page.locator("[data-terminal-session-rail]");
+
+  await rail.getByText("workspace-beta", { exact: true }).click();
+  await expect(page.getByText("history: workspace-beta")).toBeVisible();
+  await rail.getByRole("button", { name: "Close workspace session workspace-beta" }).click();
+  await page.getByRole("dialog", { name: "Close workspace session" })
+    .getByRole("button", { name: "Publish to LayerStack & close" })
+    .click();
+  await expect.poll(() => api.publishArgs).toEqual([{ workspace_session_id: "workspace-beta" }]);
+  await expect(rail.getByText("workspace-beta", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("history: quick run · shared · auto-publish")).toBeVisible();
+  await expect(page.getByText("Workspace session published")).toBeVisible();
+  await expect(page.getByText("workspace-beta · manifest v5 · 5 layers")).toBeVisible();
+
+  api.setPublishOutcome("no-op");
+  await page.goto("/p06-terminal.html?idle=1");
+  await expect(page.locator("[data-terminal-session-rail]")).toBeVisible();
+  const reloadedRail = page.locator("[data-terminal-session-rail]");
+  await reloadedRail.getByText("workspace-beta", { exact: true }).click();
+  await reloadedRail.getByRole("button", { name: "Close workspace session workspace-beta" }).click();
+  await page.getByRole("dialog", { name: "Close workspace session" })
+    .getByRole("button", { name: "Publish to LayerStack & close" })
+    .click();
+  await expect.poll(() => api.publishedSessions).toEqual(["workspace-beta", "workspace-beta"]);
+  await expect(reloadedRail.getByText("workspace-beta", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("history: quick run · shared · auto-publish")).toBeVisible();
+  await expect(page.getByText("No changes to publish; session closed")).toBeVisible();
+});
+
+test("UI-03 source conflict retains the row and selection with retry and discard guidance", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await openTerminal(page);
+  api.setPublishOutcome("conflict");
+  const rail = page.locator("[data-terminal-session-rail]");
+  await rail.getByText("workspace-beta", { exact: true }).click();
+  await rail.getByRole("button", { name: "Close workspace session workspace-beta" }).click();
+  const dialog = page.getByRole("dialog", { name: "Close workspace session" });
+  await dialog.getByRole("button", { name: "Publish to LayerStack & close" }).click();
+
+  await expect(dialog.getByText("Publish conflict; session retained")).toBeVisible();
+  await expect(dialog.getByText("notes.txt", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("source_conflict", { exact: true })).toBeVisible();
+  await expect(dialog).toContainText("Inspect or edit the retained session, then retry publishing.");
+  await expect(dialog.getByRole("button", { name: "Publish to LayerStack & close" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Discard & close" })).toBeEnabled();
+  await expect(rail.getByText("workspace-beta", { exact: true })).toBeVisible();
+  await expect(page.getByText("history: workspace-beta")).toBeVisible();
+
+  api.setPublishOutcome("commit");
+  await dialog.getByRole("button", { name: "Publish to LayerStack & close" }).click();
+  await expect.poll(() => api.publishedSessions).toEqual(["workspace-beta", "workspace-beta"]);
+  await expect(dialog).toBeHidden();
+  await expect(rail.getByText("workspace-beta", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("history: quick run · shared · auto-publish")).toBeVisible();
+});
+
+test("UI-03 protected capture drop shows its nested path, reason, and recovery guidance", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await openTerminal(page);
+  api.setPublishOutcome("protected-drop");
+  const rail = page.locator("[data-terminal-session-rail]");
+  await rail.getByText("workspace-beta", { exact: true }).click();
+  await rail.getByRole("button", { name: "Close workspace session workspace-beta" }).click();
+  const dialog = page.getByRole("dialog", { name: "Close workspace session" });
+  await dialog.getByRole("button", { name: "Publish to LayerStack & close" }).click();
+
+  await expect(dialog.getByText("Publish rejected; session retained")).toBeVisible();
+  await expect(dialog.getByText("run.fifo", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("protected_path", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("unsupported_special_file", { exact: true })).toBeVisible();
+  await expect(dialog).toContainText("Remove or replace this unsupported special file before retrying.");
+  await expect.poll(() => api.snapshotCalls).toBe(1);
+  await expect(rail.getByText("workspace-beta", { exact: true })).toBeVisible();
+  await expect(page.getByText("history: workspace-beta")).toBeVisible();
+  await expect(page.getByText("Command in workspace-beta", { exact: true })).toBeVisible();
+});
+
+test("P06 missing and snapshot-removed session selections fall back without stale execution targets", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const api = await openTerminalScenario(page, "?missing=1");
+
+  await expect(page.getByText("history: quick run · shared · auto-publish")).toBeVisible();
+  await expect(page.getByText("Quick run", { exact: true }).last()).toBeVisible();
+  await page.getByRole("textbox", { name: "Command" }).fill("echo deep-link-safe");
+  await page.getByRole("button", { name: "Run" }).click();
+  await expect.poll(() => api.execArgs.at(-1)?.cmd).toBe("echo deep-link-safe");
+  expect(api.execArgs.at(-1)).not.toHaveProperty("workspace_session_id");
+
+  await page.goto("/p06-terminal.html?idle=1");
+  const rail = page.locator("[data-terminal-session-rail]");
+  await expect(rail).toBeVisible();
+  await rail.getByText("workspace-beta", { exact: true }).click();
+  await expect(page.getByText("Command in workspace-beta", { exact: true })).toBeVisible();
+  await api.removeSession("workspace-beta");
+  await expect(page.getByText("history: quick run · shared · auto-publish")).toBeVisible();
+  await expect(page.getByText("Command in workspace-beta", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("textbox", { name: "Command" }).fill("echo snapshot-safe");
+  await page.getByRole("button", { name: "Run" }).click();
+  await expect.poll(() => api.execArgs.at(-1)?.cmd).toBe("echo snapshot-safe");
+  expect(api.execArgs.at(-1)).not.toHaveProperty("workspace_session_id");
+});
+
+test("UI-04 post-commit close failure is cleanup-only before and after reload @visual", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await openTerminal(page);
+  api.setPublishOutcome("partial");
+  const rail = page.locator("[data-terminal-session-rail]");
+  await rail.getByText("workspace-beta", { exact: true }).click();
+  await rail.getByRole("button", { name: "Close workspace session workspace-beta" }).click();
+  let dialog = page.getByRole("dialog", { name: "Close workspace session" });
+  await dialog.getByRole("button", { name: "Publish to LayerStack & close" }).click();
+
+  await expect(dialog.getByText("Published; cleanup required", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Publish to LayerStack & close" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Discard & close" })).toBeEnabled();
+  await expect(page.getByText("Published; cleanup required", { exact: true }).last()).toBeVisible();
+  await expect(page.locator("[data-terminal-composer]")).toHaveCount(0);
+  await expect(page.locator("[data-terminal-session-unavailable]")).toContainText(
+    "Commands, files, and publishing are disabled.",
+  );
+  await expect(rail.getByText("isolated · 4 layers · cleanup required", { exact: true })).toBeVisible();
+  await expect(page).toHaveScreenshot("ui-04-published-cleanup-required-1440x900.png", {
+    animations: "disabled",
+  });
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(rail.getByText("workspace-beta", { exact: true })).toBeVisible();
+  await page.goto("/p06-terminal.html?cleanup=1");
+  await expect(page.getByText("history: workspace-beta")).toBeVisible();
+  await expect(page.locator("[data-terminal-composer]")).toHaveCount(0);
+  await expect(page.locator("[data-terminal-session-unavailable]")).toContainText(
+    "Commands, files, and publishing are disabled.",
+  );
+  const reloadedRail = page.locator("[data-terminal-session-rail]");
+  await reloadedRail.getByRole("button", { name: "Close workspace session workspace-beta" }).click();
+  dialog = page.getByRole("dialog", { name: "Close workspace session" });
+  await expect(dialog.getByText("Published; cleanup required", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Publish to LayerStack & close" })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Discard & close" }).click();
+  await expect.poll(() => api.destroyedSessions).toEqual(["workspace-beta"]);
+  await expect(reloadedRail.getByText("workspace-beta", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("history: quick run · shared · auto-publish")).toBeVisible();
+  await expect(page.getByText("Workspace session cleanup complete")).toBeVisible();
 });
 
 test("P06 automatic execution omits the workspace session id", async ({ page }) => {

@@ -7,12 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResourcesView } from "@/pages/sandbox/observability/ResourcesView";
 
 const mocks = vi.hoisted(() => ({
+  fetchSandboxResources: vi.fn(),
   fetchCgroup: vi.fn(),
   fetchSandboxSnapshot: vi.fn(),
 }));
 
 vi.mock("@/api/observability", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/observability")>()),
+  fetchSandboxResources: mocks.fetchSandboxResources,
   fetchCgroup: mocks.fetchCgroup,
   fetchSandboxSnapshot: mocks.fetchSandboxSnapshot,
 }));
@@ -55,12 +57,12 @@ describe("resource route polling", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     requestSignal = undefined;
+    mocks.fetchSandboxResources.mockReset();
     mocks.fetchCgroup.mockReset();
     mocks.fetchSandboxSnapshot.mockReset();
-    mocks.fetchCgroup.mockImplementation(
+    mocks.fetchSandboxResources.mockImplementation(
       async (
         _sandboxId: string,
-        _scope: string,
         _windowMs: number,
         signal?: AbortSignal,
       ) => {
@@ -80,20 +82,21 @@ describe("resource route polling", () => {
     const view = render(<ResourcesView />, { wrapper: createWrapper() });
     await flush();
 
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(1);
-    expect(mocks.fetchCgroup).toHaveBeenCalledWith(
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledWith(
       "sandbox-a",
-      "sandbox",
       60_000,
       expect.any(AbortSignal),
     );
+    expect(mocks.fetchCgroup).not.toHaveBeenCalled();
     expect(mocks.fetchSandboxSnapshot).not.toHaveBeenCalled();
     expect(requestSignal?.aborted).toBe(false);
 
     view.unmount();
     expect(requestSignal?.aborted).toBe(true);
     await flush(20_000);
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchCgroup).not.toHaveBeenCalled();
     expect(mocks.fetchSandboxSnapshot).not.toHaveBeenCalled();
   });
 });
