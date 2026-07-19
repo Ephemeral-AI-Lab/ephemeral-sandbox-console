@@ -3,14 +3,14 @@
 
 use std::sync::Arc;
 
-use http::header::ORIGIN;
+use http::header::{CONTENT_TYPE, ORIGIN};
 use http::{Method, Request, Response, StatusCode};
 use hyper::body::Incoming;
 
 use crate::auth::DESKTOP_BOOTSTRAP_PATH;
 use crate::response::{self, BoxBody};
 use crate::state::AppState;
-use crate::{assets, catalog, daemon_api, health, proxy, rpc, sandbox_clusters};
+use crate::{assets, catalog, daemon_api, gateway_control, health, proxy, rpc, sandbox_clusters};
 
 pub async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<BoxBody> {
     let path = req.uri().path().to_owned();
@@ -72,6 +72,15 @@ pub async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Box
         }
         return catalog::handle();
     }
+    if path == "/api/gateway/start" {
+        if req.method() != Method::POST {
+            return response::text(StatusCode::METHOD_NOT_ALLOWED, "use POST");
+        }
+        if !has_json_content_type(req.headers()) {
+            return response::text(StatusCode::UNSUPPORTED_MEDIA_TYPE, "use application/json");
+        }
+        return gateway_control::start(&state).await;
+    }
     if path == "/api/sandbox-clusters" {
         return sandbox_clusters::handle(&state.sandbox_clusters, req).await;
     }
@@ -109,6 +118,17 @@ fn has_opaque_origin(headers: &http::HeaderMap) -> bool {
         .get_all(ORIGIN)
         .iter()
         .any(|origin| origin.as_bytes() == b"null")
+}
+
+fn has_json_content_type(headers: &http::HeaderMap) -> bool {
+    headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value.split(';').next().is_some_and(|media_type| {
+                media_type.trim().eq_ignore_ascii_case("application/json")
+            })
+        })
 }
 
 fn health_route(path: &str) -> Option<&str> {

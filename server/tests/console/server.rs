@@ -23,6 +23,7 @@ async fn serve_until_stops_accepting_after_cancellation() {
             gateway_socket_path: PathBuf::from(gateway.addr.to_string()),
             gateway_auth_token: Some(support::TEST_AUTH_TOKEN.to_owned()),
         },
+        gateway_start: None,
         assets_dir: None,
         cluster_registry_path: std::env::temp_dir().join(format!(
             "sandbox-console-clusters-{}.json",

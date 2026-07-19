@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
+  Button,
   Center,
   Skeleton,
   Stack,
@@ -9,8 +10,10 @@ import {
   TextInput,
   VisuallyHidden,
 } from "@mantine/core";
-import { Boxes, ChevronDown, Search } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { Boxes, ChevronDown, Power, Search } from "lucide-react";
 import { useSearchParams } from "react-router";
+import { startGateway } from "@/api/gateway";
 import type { SandboxSnapshot } from "@/api/observability";
 import { rpc, systemScope } from "@/api/rpc";
 import type { SandboxList, SandboxRecord } from "@/api/types";
@@ -206,6 +209,10 @@ export function DashboardPage() {
     mode: "slow",
   });
   const clusterRegistry = clusterList.data ?? readSandboxClusters();
+  const gatewayStart = useMutation({
+    mutationFn: startGateway,
+    onSuccess: () => window.location.reload(),
+  });
 
   const sourceFleet = currentFleetList(list.data, listFast.data, lifecycleActive);
   const previousOrder = useRef<string[]>([]);
@@ -419,12 +426,27 @@ export function DashboardPage() {
               />
             ) : fleetError && !fleet ? (
               <Center className={styles.statePanel} data-fleet-error>
-                <Stack align="center" gap={0}>
+                <Stack align="center" gap="md">
                   <p className={styles.stateTitle}>Gateway unavailable</p>
                   <p className={styles.stateCopy}>
                     {(fleetError as Error).message} — check that the sandbox gateway is
                     running. The console will retry automatically.
                   </p>
+                  <Button
+                    className={styles.gatewayStartButton}
+                    data-gateway-start
+                    leftSection={<Power aria-hidden size={17} strokeWidth={1.9} />}
+                    loading={gatewayStart.isPending}
+                    onClick={() => gatewayStart.mutate()}
+                    type="button"
+                  >
+                    Start/reload backend
+                  </Button>
+                  {gatewayStart.isError ? (
+                    <p className={styles.stateError}>
+                      {(gatewayStart.error as Error).message}
+                    </p>
+                  ) : null}
                 </Stack>
               </Center>
             ) : isViewEmpty && fleet ? (

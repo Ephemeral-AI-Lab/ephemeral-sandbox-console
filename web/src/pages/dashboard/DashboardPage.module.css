@@ -287,6 +287,26 @@
   max-width: 52ch;
 }
 
+.gatewayStartButton {
+  background: #16749b;
+  border-radius: 7px;
+  color: #fffaf5;
+  min-height: 40px;
+}
+
+.gatewayStartButton:hover {
+  background: #126486;
+}
+
+.stateError {
+  color: #8f1d1d;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 0;
+  max-width: 56ch;
+  overflow-wrap: anywhere;
+}
+
 .sandboxList {
   min-width: 0;
 }

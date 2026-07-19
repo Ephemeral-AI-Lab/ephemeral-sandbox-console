@@ -17,6 +17,7 @@ pub mod catalog;
 pub mod config;
 pub mod daemon_api;
 pub mod endpoint;
+pub mod gateway_control;
 pub mod health;
 pub mod proxy;
 pub mod response;

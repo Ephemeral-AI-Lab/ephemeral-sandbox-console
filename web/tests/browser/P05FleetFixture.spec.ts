@@ -289,27 +289,40 @@ async function installFleetApi(page: Page, options: FixtureOptions = {}) {
     }
 
     if (op === "resources") {
+      const sandboxId = scope.kind === "sandbox" ? scope.sandbox_id : "";
+      const series = emptyUsageIds.has(sandboxId)
+        ? []
+        : (options.usageById?.[sandboxId] ?? [sample]);
       const sandboxes = Object.fromEntries(list
         .filter((entry) => entry.state === "ready")
         .map((entry) => {
-          const series = emptyUsageIds.has(entry.id)
+          const currentSeries = emptyUsageIds.has(entry.id)
             ? []
             : (options.usageById?.[entry.id] ?? [sample]);
           return [entry.id, {
             availability: "available",
             errors: [],
-            current: series.at(-1) ?? null,
+            current: currentSeries.at(-1) ?? null,
           }];
         }));
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({
-          view: "resources",
-          scope: "fleet",
-          availability: "available",
-          errors: [],
-          sandboxes,
-        }),
+        body: JSON.stringify(scope.kind === "system"
+          ? {
+              view: "resources",
+              scope: "fleet",
+              availability: "available",
+              errors: [],
+              sandboxes,
+            }
+          : {
+              view: "resources",
+              scope: "sandbox",
+              sandbox_id: sandboxId,
+              availability: "available",
+              errors: [],
+              series,
+            }),
       });
       return;
     }

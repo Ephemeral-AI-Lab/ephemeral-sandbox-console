@@ -9,6 +9,7 @@ import { ResourcesView } from "@/pages/sandbox/observability/ResourcesView";
 const mocks = vi.hoisted(() => ({
   fetchSandboxResources: vi.fn(),
   fetchCgroup: vi.fn(),
+  fetchSandboxResources: vi.fn(),
   fetchSandboxSnapshot: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("@/api/observability", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/observability")>()),
   fetchSandboxResources: mocks.fetchSandboxResources,
   fetchCgroup: mocks.fetchCgroup,
+  fetchSandboxResources: mocks.fetchSandboxResources,
   fetchSandboxSnapshot: mocks.fetchSandboxSnapshot,
 }));
 
@@ -59,6 +61,7 @@ describe("resource route polling", () => {
     requestSignal = undefined;
     mocks.fetchSandboxResources.mockReset();
     mocks.fetchCgroup.mockReset();
+    mocks.fetchSandboxResources.mockReset();
     mocks.fetchSandboxSnapshot.mockReset();
     mocks.fetchSandboxResources.mockImplementation(
       async (

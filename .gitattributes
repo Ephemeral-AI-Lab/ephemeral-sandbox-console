@@ -1,0 +1,3 @@
+bin/* text eol=lf
+desktop/src-tauri/icons/**/*.xml text eol=lf
+shared/assets/manifest.json text eol=lf

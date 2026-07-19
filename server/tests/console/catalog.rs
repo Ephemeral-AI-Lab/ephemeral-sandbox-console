@@ -75,6 +75,7 @@ async fn catalog_returns_all_three_execution_spaces() {
             "snapshot",
             "trace",
             "events",
+            "daemon",
             "cgroup",
             "layerstack",
             "resources",

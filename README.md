@@ -88,6 +88,7 @@ bin/start-sandbox-console \
   --bind 127.0.0.1:7880 \
   --gateway-socket 127.0.0.1:7878 \
   --gateway-auth-token TOKEN \
+  --gateway-start-root /path/to/ephemeral-sandbox \
   --assets dist/console
 ```
 
@@ -95,6 +96,14 @@ bin/start-sandbox-console \
 `SANDBOX_CONSOLE_ASSETS` may name an installed asset directory. Environment
 tokens are preferable to command-line tokens because command-line arguments can
 be visible to other local processes.
+
+The UI includes a fixed **Start/reload backend** control. It is available when
+the BFF can identify a local core checkout. Set
+`EPHEMERAL_SANDBOX_ROOT=/path/to/ephemeral-sandbox`, pass
+`--gateway-start-root`, or place `ephemeral-sandbox` beside this repository.
+The starter uses the console's configured gateway socket and auth token, then
+reloads the UI after a readiness probe succeeds. If the gateway is already
+reachable, the control reloads the UI immediately.
 
 ## Local full stack
 

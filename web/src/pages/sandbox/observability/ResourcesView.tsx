@@ -13,6 +13,7 @@ import {
 } from "@mantine/core";
 import "uplot/dist/uPlot.min.css";
 import {
+  fetchCgroup,
   fetchSandboxResources,
   type ResourceSample,
 } from "@/api/observability";
@@ -60,15 +61,36 @@ const CHARTS = [
   },
 ] as const;
 
-/** Resource charts over the manager-owned sandbox resource series. */
+interface ResourceSeriesResult {
+  series: ResourceSample[];
+}
+
+/**
+ * Resource charts render CPU and IO counters as deltas (the sample format
+ * carries monotonic counters in `deltas`), memory and disk as gauges. Sandbox
+ * scope uses the manager-owned resource ring; workspace scopes retain the
+ * daemon cgroup route.
+ */
 export function ResourcesView() {
-  const { sandboxId } = useSandbox();
+  const { sandboxId, snapshot } = useSandbox();
   const [searchParams, setSearchParams] = useSearchParams();
+  const scope = searchParams.get("scope") ?? "sandbox";
   const windowMs = Number(searchParams.get("window") ?? 60_000);
 
-  const series = usePoll({
-    key: ["observability", sandboxId, "resources", windowMs],
-    fn: (signal) => fetchSandboxResources(sandboxId, windowMs, signal),
+  const workspaces = snapshot?.sandboxes[0]?.workspaces ?? [];
+
+  const series = usePoll<ResourceSeriesResult>({
+    key: [
+      "observability",
+      sandboxId,
+      scope === "sandbox" ? "resources" : "cgroup",
+      scope,
+      windowMs,
+    ],
+    fn: async (signal) =>
+      scope === "sandbox"
+        ? await fetchSandboxResources(sandboxId, windowMs, signal)
+        : await fetchCgroup(sandboxId, scope, windowMs, signal),
     mode: "slow",
   });
 
@@ -77,10 +99,10 @@ export function ResourcesView() {
     samples.length > 0 &&
     samples.every((sample) => sample.metrics["cgroup_available"] === false);
 
-  const applyWindow = (window: number) => {
+  const apply = (next: { scope?: string; window?: number }) => {
     const params = new URLSearchParams(searchParams);
-    params.delete("scope");
-    params.set("window", String(window));
+    if (next.scope !== undefined) params.set("scope", next.scope);
+    if (next.window !== undefined) params.set("window", String(next.window));
     setSearchParams(params, { replace: true });
   };
 
@@ -88,10 +110,24 @@ export function ResourcesView() {
     <Stack gap="md" p="md" data-resources-view>
       <Group gap="sm" align="end" wrap="wrap">
         <Select
+          label="Scope"
+          size="xs"
+          value={scope}
+          onChange={(value) => apply({ scope: value ?? "sandbox" })}
+          data={[
+            { value: "sandbox", label: "sandbox" },
+            ...workspaces.map((workspace) => ({
+              value: workspace.workspace_id,
+              label: `workspace · ${workspace.workspace_id}`,
+            })),
+          ]}
+          style={{ width: "16rem" }}
+        />
+        <Select
           label="Window"
           size="xs"
           value={String(windowMs)}
-          onChange={(value) => applyWindow(Number(value ?? WINDOWS[0].ms))}
+          onChange={(value) => apply({ window: Number(value ?? WINDOWS[0].ms) })}
           data={WINDOWS.map((window) => ({ value: String(window.ms), label: window.label }))}
           style={{ width: "9rem" }}
         />
@@ -107,9 +143,10 @@ export function ResourcesView() {
       ) : null}
 
       {unavailable ? (
-        <Alert color="yellow" title="Container metrics unavailable">
-          Manager-owned container metrics are unavailable (
+        <Alert color="yellow" title="cgroup metrics unavailable">
+          cgroup metrics are unavailable in this container (
           {String(samples[samples.length - 1]?.metrics["cgroup_error"] ?? "")})
+          — disk metrics still render for workspace scopes.
         </Alert>
       ) : null}
 
