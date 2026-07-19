@@ -15,9 +15,9 @@ import {
 import { Download, Pause, Play, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
+  fetchDaemonSelf,
   fetchSandboxResources,
-  fetchTopology,
-  type WorkspaceProcessTopology,
+  type DaemonProcessMetrics,
 } from "@/api/observability";
 import { DAEMON_HISTORY_LIMIT, type DaemonMetricPoint } from "@/core/daemonMetrics";
 import { formatBytes, formatTimestamp } from "@/lib/format";
@@ -29,7 +29,7 @@ import {
 } from "@/pages/sandbox/observability/useDaemonCapture";
 import { usePoll } from "@/poll/usePoll";
 
-const TOPOLOGY_WINDOW_MS = 60_000;
+const RESOURCE_WINDOW_MS = 60_000;
 const IDLE_MEMORY_TARGET_BYTES = 2 * 1024 * 1024;
 
 type CaptureCadence = "standard" | "close";
@@ -50,16 +50,16 @@ export function DaemonView() {
   const result = usePoll({
     key: ["observability", sandboxId, "daemon-diagnostic", cadence],
     fn: async (signal) => {
-      const [topology, resources] = await Promise.all([
-        fetchTopology(sandboxId, signal),
-        fetchSandboxResources(sandboxId, TOPOLOGY_WINDOW_MS, signal),
+      const [daemon, resources] = await Promise.all([
+        fetchDaemonSelf(sandboxId, signal),
+        fetchSandboxResources(sandboxId, RESOURCE_WINDOW_MS, signal),
       ]);
-      return { topology: topology.topology, series: resources.series };
+      return { daemon: daemon.daemon, series: resources.series };
     },
     mode: cadence === "close" ? "fast" : "slow",
     enabled: capturing && storageReady && storageError === null,
   });
-  const daemon = result.data?.topology.daemon;
+  const daemon = result.data?.daemon;
 
   useEffect(() => {
     setCapturing(true);
@@ -75,9 +75,8 @@ export function DaemonView() {
   }, [daemon, recordSample, result.dataUpdatedAt, result.isPlaceholderData]);
 
   const current = history.at(-1);
-  const topology = result.data?.topology;
   const containerMemory = latestContainerMemory(result.data?.series ?? []);
-  const activity = topology === undefined ? null : daemonActivity(topology);
+  const activity = daemon === undefined ? null : daemonActivity(daemon);
   const bufferDurationMs = history.length < 2
     ? 0
     : history.at(-1)!.sampled_at_unix_ms - history[0]!.sampled_at_unix_ms;
@@ -169,7 +168,7 @@ export function DaemonView() {
 
       {result.data !== undefined && daemon === undefined ? (
         <Alert color="yellow" role="alert" title="Daemon self-metrics are not supported by this backend">
-          The container metrics are available, but this daemon does not yet include the additive topology.daemon payload. Rebuild and restart the gateway and sandbox daemon.
+          The container metrics are available, but this backend does not yet expose the bounded daemon self-metrics operation. Rebuild and restart the gateway and sandbox daemon.
         </Alert>
       ) : null}
 
@@ -187,7 +186,7 @@ export function DaemonView() {
             targetEligible={activity?.targetEligible ?? false}
           />
           <DaemonHistoryCharts history={history} />
-          <DaemonDiagnostics current={current} topology={topology} />
+          <DaemonDiagnostics current={current} />
         </>
       ) : null}
     </Stack>
@@ -254,10 +253,8 @@ function MetricCard({
 
 function DaemonDiagnostics({
   current,
-  topology,
 }: {
   current: DaemonMetricPoint;
-  topology: WorkspaceProcessTopology | undefined;
 }) {
   const rows = [
     ["Process", `${current.name ?? "unknown"} · PID ${current.pid}`, "Identity and host PID inside the sandbox container"],
@@ -312,7 +309,7 @@ function DaemonDiagnostics({
             : <Text size="sm">None</Text>}
         </Box>
       </SimpleGrid>
-      {topology?.workspaces.length === 0 ? (
+      {(current.ownership?.open_workspaces ?? 0) === 0 ? (
         <Text size="xs" c="dimmed" mt="md">
           No managed namespace exists. Any gap between container memory and daemon RSS can be page cache, kernel memory, or an unmanaged process such as a direct container exec.
         </Text>
@@ -330,13 +327,15 @@ function CaptureFact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function daemonActivity(topology: WorkspaceProcessTopology) {
-  const workloadCount = topology.workspaces.reduce(
-    (count, workspace) => count + workspace.processes.filter((process) => process.kind === "process").length,
-    0,
-  );
-  if (workloadCount > 0) return { label: `${workloadCount} workload processes`, color: "blue" as const, targetEligible: false };
-  if (topology.workspaces.length > 0) return { label: `${topology.workspaces.length} idle namespaces`, color: "yellow" as const, targetEligible: false };
+function daemonActivity(daemon: DaemonProcessMetrics) {
+  const activeCommands = daemon.runtime_usage?.active_commands ?? 0;
+  if (activeCommands > 0) {
+    return { label: `${activeCommands} active commands`, color: "blue" as const, targetEligible: false };
+  }
+  const openWorkspaces = daemon.ownership?.open_workspaces ?? 0;
+  if (openWorkspaces > 0) {
+    return { label: `${openWorkspaces} idle namespaces`, color: "yellow" as const, targetEligible: false };
+  }
   return { label: "no managed namespaces", color: "success" as const, targetEligible: true };
 }
 

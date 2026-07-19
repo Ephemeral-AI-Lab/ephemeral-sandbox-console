@@ -8,6 +8,7 @@ import { DaemonView } from "@/pages/sandbox/observability/DaemonView";
 
 const mocks = vi.hoisted(() => ({
   fetchSandboxResources: vi.fn(),
+  fetchDaemonSelf: vi.fn(),
   fetchTopology: vi.fn(),
   fetchCgroup: vi.fn(),
   readDaemonCapture: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/api/observability", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/observability")>()),
   fetchSandboxResources: mocks.fetchSandboxResources,
+  fetchDaemonSelf: mocks.fetchDaemonSelf,
   fetchTopology: mocks.fetchTopology,
   fetchCgroup: mocks.fetchCgroup,
 }));
@@ -58,8 +60,9 @@ describe("daemon diagnostic capture", () => {
     vi.useFakeTimers();
     mocks.fetchSandboxResources.mockReset();
     mocks.fetchSandboxResources.mockResolvedValue(resourcesResponse());
+    mocks.fetchDaemonSelf.mockReset();
+    mocks.fetchDaemonSelf.mockResolvedValue(daemonResponse());
     mocks.fetchTopology.mockReset();
-    mocks.fetchTopology.mockResolvedValue(topologyResponse());
     mocks.fetchCgroup.mockReset();
     mocks.readDaemonCapture.mockReset();
     mocks.readDaemonCapture.mockResolvedValue([]);
@@ -86,10 +89,11 @@ describe("daemon diagnostic capture", () => {
       60_000,
       expect.any(AbortSignal),
     );
-    expect(mocks.fetchTopology).toHaveBeenCalledWith(
+    expect(mocks.fetchDaemonSelf).toHaveBeenCalledWith(
       "sandbox-a",
       expect.any(AbortSignal),
     );
+    expect(mocks.fetchTopology).not.toHaveBeenCalled();
     expect(mocks.fetchCgroup).not.toHaveBeenCalled();
     expect(screen.getByText("Daemon diagnostic capture")).toBeTruthy();
     expect(screen.getByText("no managed namespaces")).toBeTruthy();
@@ -101,10 +105,11 @@ describe("daemon diagnostic capture", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     const resourceCallsAfterPause = mocks.fetchSandboxResources.mock.calls.length;
-    const topologyCallsAfterPause = mocks.fetchTopology.mock.calls.length;
+    const daemonCallsAfterPause = mocks.fetchDaemonSelf.mock.calls.length;
     await flush(10_000);
     expect(mocks.fetchSandboxResources).toHaveBeenCalledTimes(resourceCallsAfterPause);
-    expect(mocks.fetchTopology).toHaveBeenCalledTimes(topologyCallsAfterPause);
+    expect(mocks.fetchDaemonSelf).toHaveBeenCalledTimes(daemonCallsAfterPause);
+    expect(mocks.fetchTopology).not.toHaveBeenCalled();
     expect(mocks.fetchCgroup).not.toHaveBeenCalled();
 
     view.unmount();
@@ -127,48 +132,41 @@ function resourcesResponse() {
   };
 }
 
-function topologyResponse() {
+function daemonResponse() {
   return {
-    view: "topology" as const,
+    view: "daemon" as const,
     scope: "sandbox",
-    topology: {
-      schema_version: 2 as const,
+    daemon: {
       available: true,
-      source: "proc_namespaces" as const,
       error: null,
-      truncated: false,
+      sampled_at_unix_ms: 1_700_000_000_000,
+      pid: 8,
+      name: "sandbox-daemon",
+      state: "S (sleeping)",
+      virtual_memory_bytes: 120_000_000,
+      resident_memory_bytes: 30_000_000,
+      peak_resident_memory_bytes: 32_000_000,
+      proportional_set_size_bytes: 28_000_000,
+      unique_set_size_bytes: 26_000_000,
+      anonymous_memory_bytes: 25_000_000,
+      file_memory_bytes: 4_000_000,
+      shared_memory_bytes: 1_000_000,
+      data_memory_bytes: 27_000_000,
+      swap_bytes: 0,
+      cpu_time_us: 1_000_000,
+      start_time_ticks: 123,
+      thread_count: 37,
+      file_descriptor_count: 15,
+      io_read_bytes: 4_096,
+      io_write_bytes: 8_192,
+      read_syscalls: 41,
+      write_syscalls: 17,
+      voluntary_context_switches: 120,
+      involuntary_context_switches: 3,
+      cgroup_memberships: ["0::/_daemon"],
       warnings: [],
-      workspaces: [],
-      daemon: {
-        available: true,
-        error: null,
-        sampled_at_unix_ms: 1_700_000_000_000,
-        pid: 8,
-        name: "sandbox-daemon",
-        state: "S (sleeping)",
-        virtual_memory_bytes: 120_000_000,
-        resident_memory_bytes: 30_000_000,
-        peak_resident_memory_bytes: 32_000_000,
-        proportional_set_size_bytes: 28_000_000,
-        unique_set_size_bytes: 26_000_000,
-        anonymous_memory_bytes: 25_000_000,
-        file_memory_bytes: 4_000_000,
-        shared_memory_bytes: 1_000_000,
-        data_memory_bytes: 27_000_000,
-        swap_bytes: 0,
-        cpu_time_us: 1_000_000,
-        start_time_ticks: 123,
-        thread_count: 37,
-        file_descriptor_count: 15,
-        io_read_bytes: 4_096,
-        io_write_bytes: 8_192,
-        read_syscalls: 41,
-        write_syscalls: 17,
-        voluntary_context_switches: 120,
-        involuntary_context_switches: 3,
-        cgroup_memberships: ["0::/_daemon"],
-        warnings: [],
-      },
+      runtime_usage: { active_commands: 0 },
+      ownership: { open_workspaces: 0 },
     },
   };
 }

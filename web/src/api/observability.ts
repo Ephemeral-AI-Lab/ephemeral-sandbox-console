@@ -129,6 +129,12 @@ export interface TopologyResult {
   topology: WorkspaceProcessTopology;
 }
 
+export interface DaemonResult {
+  view: "daemon";
+  scope: "sandbox";
+  daemon: DaemonProcessMetrics;
+}
+
 export interface DaemonProcessMetrics {
   available: boolean;
   error: string | null;
@@ -141,6 +147,8 @@ export interface DaemonProcessMetrics {
   peak_resident_memory_bytes: number | null;
   proportional_set_size_bytes: number | null;
   unique_set_size_bytes: number | null;
+  private_dirty_bytes?: number | null;
+  anonymous_huge_pages_bytes?: number | null;
   anonymous_memory_bytes: number | null;
   file_memory_bytes: number | null;
   shared_memory_bytes: number | null;
@@ -157,7 +165,14 @@ export interface DaemonProcessMetrics {
   voluntary_context_switches: number | null;
   involuntary_context_switches: number | null;
   cgroup_memberships: string[];
+  cgroup_path?: string | null;
   warnings: string[];
+  runtime_usage?: {
+    active_commands: number | null;
+  };
+  ownership?: {
+    open_workspaces: number;
+  };
 }
 
 export interface WorkspaceProcesses {
@@ -215,6 +230,13 @@ export function fetchTopology(
   signal?: AbortSignal,
 ): Promise<TopologyResult> {
   return fetchObservabilityView<TopologyResult>(sandboxId, "topology", {}, signal);
+}
+
+export function fetchDaemonSelf(
+  sandboxId: string,
+  signal?: AbortSignal,
+): Promise<DaemonResult> {
+  return fetchObservabilityView<DaemonResult>(sandboxId, "daemon", {}, signal);
 }
 
 export interface TraceEvent {

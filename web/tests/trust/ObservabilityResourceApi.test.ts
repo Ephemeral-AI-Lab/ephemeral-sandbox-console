@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchDaemonSelf,
   fetchFleetResources,
   fetchSandboxResources,
   fetchTopology,
@@ -10,7 +11,7 @@ describe("observability resource request routing", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses manager-only resource operations and one explicit topology operation", async () => {
+  it("keeps manager resources, daemon self-metrics, and topology on explicit operations", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -20,9 +21,10 @@ describe("observability resource request routing", () => {
 
     await fetchSandboxResources("sandbox-a", 60_000, signal);
     await fetchFleetResources(signal);
+    await fetchDaemonSelf("sandbox-a", signal);
     await fetchTopology("sandbox-a", signal);
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(requestBody(fetchMock, 0)).toEqual({
       op: "resources",
       scope: { kind: "sandbox", sandbox_id: "sandbox-a" },
@@ -34,12 +36,17 @@ describe("observability resource request routing", () => {
       args: {},
     });
     expect(requestBody(fetchMock, 2)).toEqual({
+      op: "daemon",
+      scope: { kind: "sandbox", sandbox_id: "sandbox-a" },
+      args: {},
+    });
+    expect(requestBody(fetchMock, 3)).toEqual({
       op: "topology",
       scope: { kind: "sandbox", sandbox_id: "sandbox-a" },
       args: {},
     });
     expect(fetchMock.mock.calls.map((call) => requestBodyValue(call[1]).op))
-      .toEqual(["resources", "resources", "topology"]);
+      .toEqual(["resources", "resources", "daemon", "topology"]);
   });
 });
 
