@@ -93,6 +93,7 @@ export interface SandboxResourcesResult {
   view: "resources";
   scope: "sandbox";
   sandbox_id: string;
+  source: "daemon_disk";
   availability: "available" | "partial";
   errors: string[];
   series: ResourceSample[];

@@ -63,12 +63,15 @@ const CHARTS = [
 
 interface ResourceSeriesResult {
   series: ResourceSample[];
+  source?: "daemon_disk";
+  availability?: "available" | "partial";
+  errors?: string[];
 }
 
 /**
  * Resource charts render CPU and IO counters as deltas (the sample format
  * carries monotonic counters in `deltas`), memory and disk as gauges. Sandbox
- * scope uses the manager-owned resource ring; workspace scopes retain the
+ * scope uses the daemon-owned bounded disk store; workspace scopes retain the
  * daemon cgroup route.
  */
 export function ResourcesView() {
@@ -96,6 +99,7 @@ export function ResourcesView() {
 
   const samples = useMemo(() => series.data?.series ?? [], [series.data]);
   const unavailable =
+    scope !== "sandbox" &&
     samples.length > 0 &&
     samples.every((sample) => sample.metrics["cgroup_available"] === false);
 
@@ -133,6 +137,7 @@ export function ResourcesView() {
         />
         <Text size="xs" c="dimmed" ml="auto">
           auto-refresh · {samples.length} samples
+          {series.data?.source === "daemon_disk" ? " · daemon disk" : ""}
         </Text>
       </Group>
 
@@ -147,6 +152,12 @@ export function ResourcesView() {
           cgroup metrics are unavailable in this container (
           {String(samples[samples.length - 1]?.metrics["cgroup_error"] ?? "")})
           — disk metrics still render for workspace scopes.
+        </Alert>
+      ) : null}
+
+      {scope === "sandbox" && series.data?.availability === "partial" ? (
+        <Alert color="yellow" title="Resource metrics partially available">
+          {(series.data.errors ?? []).join("; ")}
         </Alert>
       ) : null}
 
