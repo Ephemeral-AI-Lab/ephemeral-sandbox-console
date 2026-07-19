@@ -12,6 +12,8 @@ mod catalog_tests;
 mod config_tests;
 #[path = "console/daemon_api.rs"]
 mod daemon_api_tests;
+#[path = "console/gateway_control.rs"]
+mod gateway_control_tests;
 #[path = "console/health.rs"]
 mod health_tests;
 #[path = "console/proxy.rs"]

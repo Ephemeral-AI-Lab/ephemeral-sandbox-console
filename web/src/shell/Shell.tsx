@@ -12,7 +12,10 @@ import {
   Text,
   VisuallyHidden,
 } from "@mantine/core";
+import { useMutation } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 import { Link, Outlet, useLocation } from "react-router";
+import { startGateway } from "@/api/gateway";
 import { BRAND, PRODUCT_NAME } from "@/config/brand";
 import {
   DashboardShellContext,
@@ -124,6 +127,10 @@ export function Shell() {
     () => ({ connection, createLogs, setConnection, setCreateLogs }),
     [connection, createLogs],
   );
+  const backendStart = useMutation({
+    mutationFn: startGateway,
+    onSuccess: () => window.location.reload(),
+  });
 
   const focusActiveNavigation = () => {
     [...document.querySelectorAll<HTMLElement>("[data-shell-active-navigation]")]
@@ -256,6 +263,30 @@ export function Shell() {
         >
           <Outlet />
         </AppShell.Main>
+        {isDashboard ? (
+          <Box
+            aria-live="polite"
+            className={styles.backendControl}
+            data-backend-control
+          >
+            {backendStart.isError ? (
+              <Text className={styles.backendError}>
+                {(backendStart.error as Error).message}
+              </Text>
+            ) : null}
+            <Button
+              className={styles.backendButton}
+              data-backend-start-reload
+              leftSection={<RefreshCw aria-hidden size={16} strokeWidth={1.9} />}
+              loading={backendStart.isPending}
+              onClick={() => backendStart.mutate()}
+              title="Start backend and reload console"
+              type="button"
+            >
+              Start/reload backend
+            </Button>
+          </Box>
+        ) : null}
       </AppShell>
     </DashboardShellContext.Provider>
   );

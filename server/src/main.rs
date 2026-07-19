@@ -34,6 +34,12 @@ struct Cli {
 
     #[arg(long = "config-yaml", value_name = "PATH")]
     config_yaml: Option<PathBuf>,
+
+    #[arg(long = "gateway-start-root", value_name = "DIR")]
+    gateway_start_root: Option<PathBuf>,
+
+    #[arg(long = "gateway-start-timeout-ms", value_name = "MS")]
+    gateway_start_timeout_ms: Option<u64>,
 }
 
 #[tokio::main]
@@ -45,6 +51,8 @@ async fn main() -> ExitCode {
         cluster_registry_path: cli.cluster_registry_path,
         rpc_timeout_ms: cli.rpc_timeout_ms,
         config_yaml: cli.config_yaml,
+        gateway_start_root: cli.gateway_start_root,
+        gateway_start_timeout_ms: cli.gateway_start_timeout_ms,
         gateway: GatewayConfigOverrides {
             gateway_socket_path: cli.gateway_socket_path,
             gateway_auth_token: cli.gateway_auth_token,

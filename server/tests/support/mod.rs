@@ -10,7 +10,7 @@ use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use sandbox_console::auth::DesktopSessionAuth;
-use sandbox_console::config::ConsoleConfig;
+use sandbox_console::config::{ConsoleConfig, GatewayStartConfig};
 use sandbox_console::server;
 use sandbox_console::state::AppState;
 use sandbox_operation_client::GatewayConfig;
@@ -47,6 +47,43 @@ impl FakeGateway {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind fake gateway");
+        let addr = listener.local_addr().expect("fake gateway addr");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&requests);
+        let handler = Arc::new(handler);
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let seen = Arc::clone(&seen);
+                let handler = Arc::clone(&handler);
+                tokio::spawn(async move {
+                    let (read, mut write) = stream.into_split();
+                    let mut line = String::new();
+                    BufReader::new(read)
+                        .read_line(&mut line)
+                        .await
+                        .expect("read gateway request line");
+                    let value: Value =
+                        serde_json::from_str(&line).expect("gateway request is json");
+                    seen.lock().expect("requests lock").push(value.clone());
+                    for out in handler(&value) {
+                        let mut framed = out.into_bytes();
+                        framed.push(b'\n');
+                        write.write_all(&framed).await.expect("write gateway line");
+                    }
+                });
+            }
+        });
+        Self { addr, requests }
+    }
+
+    pub async fn spawn_on<F>(addr: SocketAddr, handler: F) -> Self
+    where
+        F: Fn(&Value) -> Vec<String> + Send + Sync + 'static,
+    {
+        let listener = TcpListener::bind(addr).await.expect("bind fake gateway");
         let addr = listener.local_addr().expect("fake gateway addr");
         let requests = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&requests);
@@ -274,6 +311,24 @@ pub async fn spawn_console_with_desktop_auth(
     rpc_timeout: Duration,
     credentials: Option<(&str, &str)>,
 ) -> SocketAddr {
+    spawn_console_with_options(gateway_addr, assets_dir, rpc_timeout, None, credentials).await
+}
+
+pub async fn spawn_console_with_gateway_start(
+    gateway_addr: SocketAddr,
+    rpc_timeout: Duration,
+    gateway_start: GatewayStartConfig,
+) -> SocketAddr {
+    spawn_console_with_options(gateway_addr, None, rpc_timeout, Some(gateway_start), None).await
+}
+
+async fn spawn_console_with_options(
+    gateway_addr: SocketAddr,
+    assets_dir: Option<PathBuf>,
+    rpc_timeout: Duration,
+    gateway_start: Option<GatewayStartConfig>,
+    credentials: Option<(&str, &str)>,
+) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind console");
@@ -284,6 +339,7 @@ pub async fn spawn_console_with_desktop_auth(
             gateway_socket_path: PathBuf::from(gateway_addr.to_string()),
             gateway_auth_token: Some(TEST_AUTH_TOKEN.to_owned()),
         },
+        gateway_start,
         assets_dir,
         cluster_registry_path: std::env::temp_dir().join(format!(
             "sandbox-console-clusters-{}.json",
@@ -373,6 +429,17 @@ pub async fn post_rpc_raw(
     let request = builder
         .body(full_body(body.to_owned()))
         .expect("build rpc request");
+    send_request(addr, request).await.0
+}
+
+pub async fn post_gateway_start(addr: SocketAddr) -> Response<Incoming> {
+    let request = Request::builder()
+        .method(http::Method::POST)
+        .uri("/api/gateway/start")
+        .header(http::header::HOST, "console.test")
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(full_body("{}"))
+        .expect("build gateway start request");
     send_request(addr, request).await.0
 }
 

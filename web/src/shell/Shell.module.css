@@ -113,6 +113,46 @@
   height: 100dvh;
 }
 
+.backendControl {
+  align-items: flex-end;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 24px));
+  position: fixed;
+  right: 18px;
+  z-index: 30;
+}
+
+.backendButton {
+  background: #16749b;
+  border: 1px solid rgb(255 250 245 / 28%);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgb(39 31 28 / 16%);
+  color: #fffaf5;
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.backendButton:hover {
+  background: #126486;
+}
+
+.backendError {
+  background: rgb(255 250 245 / 96%);
+  border: 1px solid rgb(186 26 26 / 24%);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgb(39 31 28 / 12%);
+  color: #8f1d1d;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+}
+
 @media (max-width: 47.99em) {
   .headerInner {
     gap: 8px;
@@ -122,6 +162,16 @@
   .consolePill {
     min-height: 28px;
     padding-inline: 8px;
+  }
+
+  .backendControl {
+    align-items: stretch;
+    bottom: 12px;
+    right: 12px;
+  }
+
+  .backendButton {
+    max-width: 100%;
   }
 }
 
