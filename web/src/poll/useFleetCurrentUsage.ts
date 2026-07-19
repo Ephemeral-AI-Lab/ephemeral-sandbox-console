@@ -1,5 +1,5 @@
 import { keepPreviousData, useQueries } from "@tanstack/react-query";
-import { fetchCgroup } from "@/api/observability";
+import { fetchSandboxResources } from "@/api/observability";
 import type { SandboxRecord } from "@/api/types";
 import {
   currentUsageFromSeries,
@@ -17,7 +17,7 @@ export function useFleetCurrentUsage(records: SandboxRecord[]) {
     queries: records.map((record) => ({
       queryKey: ["sandbox", record.id, "current-usage"],
       queryFn: ({ signal }: { signal: AbortSignal }) =>
-        fetchCgroup(record.id, "sandbox", FLEET_USAGE_WINDOW_MS, signal),
+        fetchSandboxResources(record.id, FLEET_USAGE_WINDOW_MS, signal),
       enabled: record.state === "ready",
       retry: false,
       placeholderData: keepPreviousData,

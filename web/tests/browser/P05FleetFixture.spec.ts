@@ -287,6 +287,25 @@ async function installFleetApi(page: Page, options: FixtureOptions = {}) {
       return;
     }
 
+    if (op === "resources") {
+      const sandboxId = scope.kind === "sandbox" ? scope.sandbox_id : "";
+      const series = emptyUsageIds.has(sandboxId)
+        ? []
+        : (options.usageById?.[sandboxId] ?? [sample]);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          view: "resources",
+          scope: "sandbox",
+          sandbox_id: sandboxId,
+          availability: "available",
+          errors: [],
+          series,
+        }),
+      });
+      return;
+    }
+
     if (op === "cgroup") {
       const sandboxId = scope.kind === "sandbox" ? scope.sandbox_id : "";
       const series = emptyUsageIds.has(sandboxId)

@@ -83,6 +83,25 @@ export interface CgroupSeries {
   topology: WorkspaceProcessTopology;
 }
 
+export interface SandboxResourcesResult {
+  view: "resources";
+  scope: string;
+  sandbox_id: string;
+  availability: string;
+  errors: string[];
+  series: ResourceSample[];
+}
+
+export function fetchSandboxResources(
+  sandboxId: string,
+  windowMs: number,
+  signal?: AbortSignal,
+): Promise<SandboxResourcesResult> {
+  return fetchObservabilityView<SandboxResourcesResult>(sandboxId, "resources", {
+    window_ms: windowMs,
+  }, signal);
+}
+
 export interface WorkspaceProcessTopology {
   schema_version: 2;
   available: boolean;

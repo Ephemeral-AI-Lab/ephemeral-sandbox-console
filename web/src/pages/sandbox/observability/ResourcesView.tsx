@@ -14,6 +14,7 @@ import {
 import "uplot/dist/uPlot.min.css";
 import {
   fetchCgroup,
+  fetchSandboxResources,
   type ResourceSample,
 } from "@/api/observability";
 import { usePoll } from "@/poll/usePoll";
@@ -60,11 +61,15 @@ const CHARTS = [
   },
 ] as const;
 
+interface ResourceSeriesResult {
+  series: ResourceSample[];
+}
+
 /**
- * Resource charts over the `cgroup` view: CPU and IO counters render as
- * deltas (the sample format carries monotonic counters in `deltas`), memory
- * and disk as gauges; the scope picker mirrors the op's `--scope` argument
- * (sandbox or one workspace id) and the window caps at the API's 600s max.
+ * Resource charts render CPU and IO counters as deltas (the sample format
+ * carries monotonic counters in `deltas`), memory and disk as gauges. Sandbox
+ * scope uses the manager-owned resource ring; workspace scopes retain the
+ * daemon cgroup route.
  */
 export function ResourcesView() {
   const { sandboxId, snapshot } = useSandbox();
@@ -74,9 +79,18 @@ export function ResourcesView() {
 
   const workspaces = snapshot?.sandboxes[0]?.workspaces ?? [];
 
-  const series = usePoll({
-    key: ["observability", sandboxId, "cgroup", scope, windowMs],
-    fn: (signal) => fetchCgroup(sandboxId, scope, windowMs, signal),
+  const series = usePoll<ResourceSeriesResult>({
+    key: [
+      "observability",
+      sandboxId,
+      scope === "sandbox" ? "resources" : "cgroup",
+      scope,
+      windowMs,
+    ],
+    fn: async (signal) =>
+      scope === "sandbox"
+        ? await fetchSandboxResources(sandboxId, windowMs, signal)
+        : await fetchCgroup(sandboxId, scope, windowMs, signal),
     mode: "slow",
   });
 

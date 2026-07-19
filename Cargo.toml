@@ -20,10 +20,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", default-features = false, features = ["v4"] }
 
-sandbox-config = { git = "https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git", rev = "25363d06d679edcde26839f5483ee7ca18e5c980" }
-sandbox-operation-catalog = { git = "https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git", rev = "25363d06d679edcde26839f5483ee7ca18e5c980", default-features = false }
-sandbox-operation-client = { git = "https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git", rev = "25363d06d679edcde26839f5483ee7ca18e5c980" }
-sandbox-operation-contract = { git = "https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git", rev = "25363d06d679edcde26839f5483ee7ca18e5c980" }
+sandbox-config = { git = "https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git", rev = "ac09a1b301ded01ee3813dc31920c0388d322563" }
+sandbox-operation-catalog = { git = "https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git", rev = "ac09a1b301ded01ee3813dc31920c0388d322563", default-features = false }
+sandbox-operation-client = { git = "https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git", rev = "ac09a1b301ded01ee3813dc31920c0388d322563" }
+sandbox-operation-contract = { git = "https://github.com/Ephemeral-AI-Lab/ephemeral-sandbox.git", rev = "ac09a1b301ded01ee3813dc31920c0388d322563" }
 
 [workspace.lints.clippy]
 correctness = { level = "deny", priority = -1 }

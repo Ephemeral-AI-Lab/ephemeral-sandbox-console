@@ -8,12 +8,14 @@ import { ResourcesView } from "@/pages/sandbox/observability/ResourcesView";
 
 const mocks = vi.hoisted(() => ({
   fetchCgroup: vi.fn(),
+  fetchSandboxResources: vi.fn(),
   fetchSandboxSnapshot: vi.fn(),
 }));
 
 vi.mock("@/api/observability", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/observability")>()),
   fetchCgroup: mocks.fetchCgroup,
+  fetchSandboxResources: mocks.fetchSandboxResources,
   fetchSandboxSnapshot: mocks.fetchSandboxSnapshot,
 }));
 
@@ -56,11 +58,11 @@ describe("resource route polling", () => {
     vi.useFakeTimers();
     requestSignal = undefined;
     mocks.fetchCgroup.mockReset();
+    mocks.fetchSandboxResources.mockReset();
     mocks.fetchSandboxSnapshot.mockReset();
-    mocks.fetchCgroup.mockImplementation(
+    mocks.fetchSandboxResources.mockImplementation(
       async (
         _sandboxId: string,
-        _scope: string,
         _windowMs: number,
         signal?: AbortSignal,
       ) => {
@@ -80,20 +82,21 @@ describe("resource route polling", () => {
     const view = render(<ResourcesView />, { wrapper: createWrapper() });
     await flush();
 
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(1);
-    expect(mocks.fetchCgroup).toHaveBeenCalledWith(
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledWith(
       "sandbox-a",
-      "sandbox",
       60_000,
       expect.any(AbortSignal),
     );
+    expect(mocks.fetchCgroup).not.toHaveBeenCalled();
     expect(mocks.fetchSandboxSnapshot).not.toHaveBeenCalled();
     expect(requestSignal?.aborted).toBe(false);
 
     view.unmount();
     expect(requestSignal?.aborted).toBe(true);
     await flush(20_000);
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchCgroup).not.toHaveBeenCalled();
     expect(mocks.fetchSandboxSnapshot).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,8 @@ use std::time::Duration;
 use http::StatusCode;
 use sandbox_operation_catalog::internal::runtime::EXPORT_LAYERSTACK;
 use sandbox_operation_catalog::observability::{
-    CGROUP_SPEC, EVENTS_SPEC, LAYERSTACK_SPEC, SNAPSHOT_SPEC, TRACE_SPEC,
+    CGROUP_SPEC, DAEMON_SPEC, EVENTS_SPEC, LAYERSTACK_SPEC, RESOURCES_SPEC, SNAPSHOT_SPEC,
+    TOPOLOGY_SPEC, TRACE_SPEC,
 };
 use sandbox_operation_client::MAX_REQUEST_BYTES;
 use serde_json::json;
@@ -116,6 +117,9 @@ async fn concrete_observability_calls_preserve_the_rpc_envelope() {
         (SNAPSHOT_SPEC.name, json!({})),
         (TRACE_SPEC.name, json!({"trace_id": "last"})),
         (EVENTS_SPEC.name, json!({"last_n": 10})),
+        (RESOURCES_SPEC.name, json!({"window_ms": 30000})),
+        (DAEMON_SPEC.name, json!({})),
+        (TOPOLOGY_SPEC.name, json!({})),
         (
             CGROUP_SPEC.name,
             json!({"scope": "sandbox", "window_ms": 30000}),

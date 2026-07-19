@@ -4,7 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CgroupSeries, ResourceSample, SandboxSnapshot } from "@/api/observability";
+import type {
+  ResourceSample,
+  SandboxResourcesResult,
+  SandboxSnapshot,
+} from "@/api/observability";
 import type { SandboxRecord } from "@/api/types";
 import { SandboxCard } from "@/pages/fleet/SandboxCard";
 import {
@@ -14,12 +18,12 @@ import {
 } from "@/poll/useFleetCurrentUsage";
 
 const mocks = vi.hoisted(() => ({
-  fetchCgroup: vi.fn(),
+  fetchSandboxResources: vi.fn(),
 }));
 
 vi.mock("@/api/observability", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/observability")>()),
-  fetchCgroup: mocks.fetchCgroup,
+  fetchSandboxResources: mocks.fetchSandboxResources,
 }));
 
 function record(id: string, state: SandboxRecord["state"] = "ready"): SandboxRecord {
@@ -48,20 +52,14 @@ function sample(
   };
 }
 
-function series(samples: ResourceSample[]): CgroupSeries {
+function series(samples: ResourceSample[]): SandboxResourcesResult {
   return {
-    view: "cgroup",
+    view: "resources",
     scope: "sandbox",
+    sandbox_id: "sandbox-a",
+    availability: "available",
+    errors: [],
     series: samples,
-    topology: {
-      schema_version: 2,
-      available: false,
-      source: null,
-      error: null,
-      truncated: false,
-      warnings: [],
-      workspaces: [],
-    },
   };
 }
 
@@ -110,8 +108,8 @@ async function flush(milliseconds = 0) {
 describe("Fleet current usage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    mocks.fetchCgroup.mockReset();
-    mocks.fetchCgroup.mockResolvedValue(
+    mocks.fetchSandboxResources.mockReset();
+    mocks.fetchSandboxResources.mockResolvedValue(
       series([
         sample(1_000, 2_000, 20_000, 20_000_000),
         sample(1_005, 5, 0, 21_000_000),
@@ -143,17 +141,16 @@ describe("Fleet current usage", () => {
     });
     await flush();
 
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(1);
-    expect(mocks.fetchCgroup).toHaveBeenCalledWith(
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledWith(
       "sandbox-a",
-      "sandbox",
       FLEET_USAGE_WINDOW_MS,
       expect.any(AbortSignal),
     );
     expect(screen.getByText("21000000")).toBeTruthy();
 
     await flush(2_000);
-    expect(mocks.fetchCgroup).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchSandboxResources).toHaveBeenCalledTimes(2);
   });
 
   it("drops cached current usage when a sandbox leaves ready", async () => {

@@ -125,6 +125,16 @@ export async function installAtlasApi(page: Page) {
       case "snapshot":
         body = scope.kind === "sandbox" ? snapshot.sandboxes[0] : snapshot;
         break;
+      case "resources":
+        body = {
+          view: "resources",
+          scope: "sandbox",
+          sandbox_id: SANDBOX_ID,
+          availability: "available",
+          errors: [],
+          series: samples,
+        };
+        break;
       case "cgroup":
         body = { view: "cgroup", scope: String(args.scope ?? "sandbox"), series: samples, topology };
         break;
